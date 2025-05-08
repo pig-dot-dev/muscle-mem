@@ -1,0 +1,47 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "muscle-mem"
+version = "0.0.0"
+authors = [
+    { name = "Erik Dunteman", email = "erikdunteman@gmail.com" },
+]
+description = "muscle memory"
+readme = "README.md"
+requires-python = ">=3.7"
+dependencies = [
+]
+
+[tool.hatch.build]
+packages = ["src"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/muscle_mem"] 
+
+# .[dev]
+
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.3.0",
+    "twine",
+    "build"
+]
+
+[tool.ruff]
+include = ["src/muscle_mem/**/*.py", "tests/**/*.py"]
+target-version = "py37"
+
+# Enable rules
+lint.select = [
+    "E",  # pycodestyle
+    "F",  # pyflakes
+    "I",  # isort
+    "B",  # flake8-bugbear
+    "N",  # pep8-naming
+]
+lint.ignore = []
+lint.dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
+
+line-length = 160

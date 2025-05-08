@@ -1,1 +1,3 @@
-# muscle-mem
+# Muscle Memory
+
+SDK for Muscle Memory
