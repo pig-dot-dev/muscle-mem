@@ -32,37 +32,38 @@ def agent(name: str):
         hello(name + " + " + str(i))
 
 if __name__ == "__main__":
+    engine.set_agent(agent)
     # Different 0.9s tasks both are cache_misses
-    cache_hit = engine.run(agent, "john")
+    cache_hit = engine("john")
     assert not cache_hit
-    cache_hit = engine.run(agent, "erik")
+    cache_hit = engine("erik")
     assert not cache_hit
 
     # Rerunning same 0.9s task within compare timeout is cache hit + new trajectory
-    cache_hit = engine.run(agent, "erik")
+    cache_hit = engine("erik")
     assert cache_hit
 
     # Rerunning same 0.9s task will cache miss on first trajectory, but is within compare timeout for second
-    cache_hit = engine.run(agent, "erik")
+    cache_hit = engine("erik")
     assert cache_hit
 
     # Rerunning same 0.9s task will cache miss on first trajectory and second trajectory, but is within compare timeout for third
-    cache_hit = engine.run(agent, "erik")
+    cache_hit = engine("erik")
     assert cache_hit
 
     # Intentionally breaking cache will cause a cache miss
     time.sleep(1)
-    cache_hit = engine.run(agent, "erik")
+    cache_hit = engine("erik")
     assert not cache_hit
 
     # Rerunning same 0.9s task will cache hit on most recent trajectory
-    cache_hit = engine.run(agent, "erik")
+    cache_hit = engine("erik")
     assert cache_hit
 
     # Rerunning different task would be a cache miss
-    cache_hit = engine.run(agent, "john")
+    cache_hit = engine("john")
     assert not cache_hit
-    cache_hit = engine.run(agent, "jack")
+    cache_hit = engine("jack")
     assert not cache_hit
     
 

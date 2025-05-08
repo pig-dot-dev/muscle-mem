@@ -12,6 +12,7 @@ description = "muscle memory"
 readme = "README.md"
 requires-python = ">=3.7"
 dependencies = [
+    "colorama"
 ]
 
 [tool.hatch.build]
@@ -26,7 +27,12 @@ packages = ["src/muscle_mem"]
 dev = [
     "ruff>=0.3.0",
     "twine",
-    "build"
+    "build",
+
+    # for CUA test
+    "openai",
+    "transformers",
+    "torch"
 ]
 
 [tool.ruff]
