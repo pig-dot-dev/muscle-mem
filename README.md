@@ -12,6 +12,9 @@ This system is inspired by:
 - [JIT compilers](https://en.wikipedia.org/wiki/Just-in-time_compilation)
 - [Human muscle memory](https://en.wikipedia.org/wiki/Muscle_memory)
 
+### Dev Log
+- May 7, 2025 - [First working demo](https://www.loom.com/share/5936cd9779504aa5a7dce5d72370c35d)
+- May 8, 2025 - Open sourced
 <br>
 <br>
 
