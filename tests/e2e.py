@@ -4,7 +4,6 @@ import time
 
 # contrived example: agent that greets a person with the current time
 
-
 engine = Engine()
 
 @dataclass
@@ -17,7 +16,7 @@ def capture(name: str) -> Snapshot:
     return Snapshot(name=name, time=now)
 
 def compare(current: Snapshot, candidate: Snapshot) -> bool:
-    # pass if happened within the last 2 seconds
+    # pass if happened within the last 1 second
     diff = current.time - candidate.time
     passed = diff <= 1
     return passed
