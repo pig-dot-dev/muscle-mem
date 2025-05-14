@@ -90,8 +90,8 @@ The Check is the fundamental building block for cache validation. They determine
 
 Each Check encapsulates:
 
-- A `capture` callback to extracts relevant features from the current environment
-- A `compare` callback to determines if current environment matches cached environment
+- A `capture` callback to extract relevant features from the current environment
+- A `compare` callback to determine if current environment matches cached environment
 
 ```python
 Check(
