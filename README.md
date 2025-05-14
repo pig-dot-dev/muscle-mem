@@ -1,16 +1,14 @@
 # Muscle Memory
 
-`muscle-mem` is a skill cache for AI agents.
+`muscle-mem` is a behavior cache for AI agents.
 
 It is a Python SDK that records your agent's tool-calling patterns as it solves tasks, and will deterministically replay those learned trajectories whenever the task is encountered again, falling back to agent mode if edge cases are detected.
 
 The goal of `muscle-mem` is to get LLMs out of the hotpath for repetitive tasks, increasing speed, reducing variability, and eliminating token costs for the many cases that ***could have just been a script***.
 
-This system is inspired by:
-- Building computer-use agents at [Pig.dev](https://pig.dev), and realizing users don't want AI, they just want better RPA
-- The [Voyager](https://arxiv.org/abs/2305.16291) paper
-- [JIT compilers](https://en.wikipedia.org/wiki/Just-in-time_compilation)
-- [Human muscle memory](https://en.wikipedia.org/wiki/Muscle_memory)
+It's unexplored territory, so all feedback is welcome!
+- Read [Muscle Mem - Removing LLM calls from Agents](https://erikdunteman.com/blog/muscle-mem/) for more context
+- Join [Muscle Mem discord](https://discord.gg/s84dXDff3K) for feedback
 
 ### Dev Log
 - May 7, 2025 - [First working demo](https://www.loom.com/share/5936cd9779504aa5a7dce5d72370c35d)
