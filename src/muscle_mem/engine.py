@@ -1,28 +1,73 @@
 import functools
+import ast
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Callable, Dict, Optional, ParamSpec, TypeVar
+import inspect
+import hashlib
 
 from colorama import Fore, Style
 
 from .check import Check
-from .persistance import DB
+from .persistence import DB
 from .types import Step, Trajectory
 
 P = ParamSpec("P")
 R = TypeVar("R")
 
-# Local datatype to track tool implementations in memory.
+def hash_ast(func):
+    # Hashes the ast of a function, to raise errors if implementation changes from persisted tools
+    source = inspect.getsource(func)
+    tree = ast.parse(source)
+    tree_dump = ast.dump(tree, annotate_fields=True, include_attributes=False)
+    hash = hashlib.sha256(tree_dump.encode('utf-8')).hexdigest()
+    return hash
+        
 @dataclass
 class Tool:
+    # A local datatype to track tool implementations in-memory.
     func: Callable[P, R]
+    func_name: str
+    func_hash: str
     pre_check: Optional[Check]
     post_check: Optional[Check]
 
-class Engine:
+    def __init__(self, func: Callable[P, R], pre_check: Optional[Check], post_check: Optional[Check]):
+        self.func = func
+        self.func_name = func.__name__
+        self.func_hash = hash_ast(func)
+        self.pre_check = pre_check
+        self.post_check = post_check
+
+
+class Tools():
+    # Persistence cannot store function implementations, so we store symbol names and hashes there
+    # And resolve them back to their local implementation.
+
     def __init__(self):
         self.tools: Dict[str, Tool] = {}
+    
+    def register(self, tool: Tool):
+        if tool.func_name in self.tools:
+            raise ValueError(f"Tool by name {tool.func_name} already registered")
 
+        self.tools[tool.func_name] = tool
+
+    def get(self, name: str, hash: str):
+        if not name in self.tools:
+            return None
+        
+        tool = self.tools[name]
+        if not tool.func_hash == hash:
+            # consider some clear error here to warn that the tool's implementation has changed?
+            # there's definitely a "strict mode" config that could be used here
+            return None
+
+        return tool        
+
+class Engine:
+    def __init__(self):
+        self.tools: Tools = Tools()
         self.db: DB = DB()
 
         self.mode = "engine"
@@ -72,9 +117,13 @@ class Engine:
             selected = None
             for trajectory in candidate_trajectories:
                 passed = 0
-                for step in trajectory.steps:
+                for step in trajectory.steps:             
                     if step.pre_check_snapshot is not None:
-                        tool = self.tools[step.function_symbol]
+                        # Retrieve local tool implementation for step
+                        tool = self.tools.get(step.func_name, step.func_hash)
+                        if not tool:
+                            # candidate trajectory contains a tool that's been changed or removed
+                            break
                         current = tool.pre_check.capture(*step.args, **step.kwargs)
                         step_passed = tool.pre_check.compare(current, step.pre_check_snapshot)
                         if not step_passed:
@@ -92,12 +141,18 @@ class Engine:
             self.current_trajectory = Trajectory(task=task, steps=[])
             for step in selected.steps:
                 # Run prechecks while executing (redundant to query stage, but necessary to detect changing state)
+
+                # Retrieve local tool implementation for step
+                tool = self.tools.get(step.func_name, step.func_hash)
+                if not tool:
+                    raise ValueError("Tools lookup unexpectedly failed at runtime, despite working at query time.")
+
                 new_step = Step(
-                    function_symbol=step.function_symbol,
+                    func_name=step.func_name,
+                    func_hash=step.func_hash,
                     args=step.args,
                     kwargs=step.kwargs,
                 )
-                tool = self.tools[step.function_symbol]
 
                 if tool.pre_check:
                     if step.pre_check_snapshot is None:
@@ -147,10 +202,9 @@ class Engine:
         """
 
         def decorator(func: Callable[P, R]) -> Callable[P, R]:
-            if func.__name__ in self.tools:
-                raise ValueError(f"Tool by name {func.__name__} already registered")
-            self.tools[func.__name__] = Tool(func=func, pre_check=pre_check, post_check=post_check)
-            
+            tool = Tool(func=func, pre_check=pre_check, post_check=post_check)
+            self.tools.register(tool)
+
             @functools.wraps(func)
             def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
                 if not self.recording:
@@ -159,7 +213,8 @@ class Engine:
                 if pre_check:
                     snapshot = pre_check.capture(*args, **kwargs)
                     self.current_trajectory.steps.append(Step(
-                        function_symbol=func.__name__,
+                        func_name=func.__name__,
+                        func_hash=tool.func_hash,
                         args=args,
                         kwargs=kwargs,
                         pre_check_snapshot=snapshot
@@ -168,7 +223,8 @@ class Engine:
                 if post_check:
                     snapshot = post_check.capture(*args, **kwargs)
                     self.current_trajectory.steps.append(Step(
-                        function_symbol=func.__name__,
+                        func_name=func.__name__,
+                        func_hash=tool.func_hash,
                         args=args,
                         kwargs=kwargs,
                         post_check_snapshot=snapshot

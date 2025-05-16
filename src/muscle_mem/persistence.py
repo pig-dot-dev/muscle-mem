@@ -10,6 +10,8 @@ class DB:
         self.trajectories: List[Trajectory] = []
 
     def add_trajectory(self, trajectory: Trajectory):
+        # assert trajectory can serialize. Don't actually do anything with that info though
+        
         self.trajectories.append(trajectory)
 
     def fetch_trajectories(self, task: str) -> List[Trajectory]:
