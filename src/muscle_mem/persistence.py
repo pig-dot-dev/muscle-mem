@@ -1,5 +1,7 @@
 from typing import List
+
 from .types import Trajectory
+
 
 # Currently minimal, in-memory, and highly unoptimized
 # Suggestions welcome for database implementations

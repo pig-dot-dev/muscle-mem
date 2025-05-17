@@ -1,14 +1,6 @@
-from dataclasses import dataclass, is_dataclass, asdict
 import pickle
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, ParamSpec, TypeVar
-
-
-pydantic_enabled = False
-try:
-    from pydantic import BaseModel
-    pydantic_enabled = True
-except:
-    pass
 
 P = ParamSpec("P")
 R = TypeVar("R")
@@ -23,7 +15,15 @@ class Step:
     _pre_check_snapshot_data: Optional[bytes] = None
     _post_check_snapshot_data: Optional[bytes] = None
 
-    def __init__(self, func_name: str, func_hash: str, args: List[Any], kwargs: Dict[str, Any], pre_check_snapshot: Optional[bytes] = None, post_check_snapshot: Optional[bytes] = None):
+    def __init__(
+            self,
+            func_name: str, 
+            func_hash: str,
+            args: List[Any], 
+            kwargs: Dict[str, Any],
+            pre_check_snapshot: Optional[bytes] = None, 
+            post_check_snapshot: Optional[bytes] = None
+        ):
         self.func_name = func_name
         self.func_hash = func_hash
         self.args = args

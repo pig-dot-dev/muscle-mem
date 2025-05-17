@@ -5,17 +5,14 @@ This module implements a test using the muscle_mem engine with a real agent
 that interacts with computer interfaces through images.
 """
 
-import os
 import base64
-import torch
-from typing import Dict, Any, Tuple
-from dataclasses import dataclass
-from PIL import Image, ImageDraw
-from transformers import CLIPProcessor, CLIPModel
-from openai import OpenAI
-from openai.types.responses import ResponseComputerToolCall, ResponseComputerToolCallOutputItem, ResponseInputImageParam, ResponseInputTextParam, ResponseOutputText, ResponseOutputMessage
-from openai.types.responses.response_input_item_param import Message
 
+import torch
+from openai import OpenAI
+from openai.types.responses import ResponseInputImageParam, ResponseInputTextParam, ResponseOutputText
+from openai.types.responses.response_input_item_param import Message
+from PIL import Image, ImageDraw
+from transformers import CLIPModel, CLIPProcessor
 
 from muscle_mem import Check, Engine
 

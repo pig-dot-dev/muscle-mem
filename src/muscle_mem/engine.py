@@ -1,11 +1,10 @@
-import functools
 import ast
+import functools
+import hashlib
+import inspect
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Callable, Dict, Optional, ParamSpec, TypeVar
-import inspect
-import hashlib
-import json
 
 from colorama import Fore, Style
 
@@ -61,7 +60,7 @@ class Tools():
         self.tools[tool.func_name] = tool
 
     def get(self, name: str, hash: str):
-        if not name in self.tools:
+        if name not in self.tools:
             return None
         
         tool = self.tools[name]

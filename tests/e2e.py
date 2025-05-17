@@ -1,6 +1,7 @@
-from dataclasses import dataclass
-from muscle_mem import Check, Engine
 import time
+from dataclasses import dataclass
+
+from muscle_mem import Check, Engine
 
 # contrived example: agent that greets a person with the current time
 
@@ -65,15 +66,3 @@ if __name__ == "__main__":
     cache_hit = engine("jack")
     assert not cache_hit
     
-
-    # but further issue is once we have multiple trajectories, do we run prechecks on just first step, or on all steps? how do you differentiate
-    # is trajectory selection completely based on first step passing? if we're partway through a trajectory and it breaks
-    # do we re-record the trajectory from the point of failure?
-    # it feels like trajectories should subdivide between common failure points (IE a full trajectory should be doable if all steps pass at query time)
-    # thus if it breaks partway through, that means the first set of passed steps are a valid trajectory, and perhaps steps taken from this point onward are a new trajectory
-    
-    # whole trajectory should be tested at query time. use agent in cases where there's not a full pass.
-    # - what happens if a trajectory partially passes at query time? though again, that's a sign it's not just one trajectory but multiple
-    # and still check as you go, as env could change unexpectedly.
-
-    # yes, confirm, if a trajectory breaks at, that means it's not a valid trajectory, it's a composite of multiple trajectories w/ variability in the middle.
