@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Callable, Dict, Optional, ParamSpec, TypeVar
 import inspect
 import hashlib
+import json
 
 from colorama import Fore, Style
 
@@ -18,6 +19,12 @@ R = TypeVar("R")
 def hash_ast(func):
     # Hashes the ast of a function, to raise errors if implementation changes from persisted tools
     source = inspect.getsource(func)
+
+    # trim indendation (ast.parse assumes function is at global scope)
+    first_line = source.splitlines()[0]
+    to_trim = " " * (len(first_line) - len(first_line.lstrip()))
+    source = "\n".join([line.removeprefix(to_trim) for line in source.splitlines()])    
+    
     tree = ast.parse(source)
     tree_dump = ast.dump(tree, annotate_fields=True, include_attributes=False)
     hash = hashlib.sha256(tree_dump.encode('utf-8')).hexdigest()
@@ -158,7 +165,7 @@ class Engine:
                     if step.pre_check_snapshot is None:
                         raise ValueError("Retrieved trajectory is missing expected pre-check snapshot")
                     current = tool.pre_check.capture(*step.args, **step.kwargs)
-                    new_step.pre_check_snapshot = current
+                    new_step.add_pre_check_snapshot(current)
                     step_safe = tool.pre_check.compare(current, step.pre_check_snapshot)
                     if not step_safe:
                         raise ValueError("Retrieved trajectory is no longer safe to execute")
@@ -173,7 +180,7 @@ class Engine:
                     if step.post_check_snapshot is None:
                         raise ValueError("Retrieved trajectory is missing expected post-check snapshot")
                     current = tool.post_check.capture(*step.args, **step.kwargs)
-                    new_step.post_check_snapshot = current
+                    new_step.add_post_check_snapshot(current)
                     step_success = tool.post_check.compare(current, step.post_check_snapshot)
                     if not step_success:
                         raise ValueError("Retrieved trajectory failed post-check")
@@ -206,10 +213,12 @@ class Engine:
             self.tools.register(tool)
 
             @functools.wraps(func)
-            def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
+            def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:  
+
                 if not self.recording:
                     # Don't trace
                     return func(*args, **kwargs)
+
                 if pre_check:
                     snapshot = pre_check.capture(*args, **kwargs)
                     self.current_trajectory.steps.append(Step(
@@ -219,7 +228,9 @@ class Engine:
                         kwargs=kwargs,
                         pre_check_snapshot=snapshot
                     ))
+
                 result = func(*args, **kwargs)
+
                 if post_check:
                     snapshot = post_check.capture(*args, **kwargs)
                     self.current_trajectory.steps.append(Step(

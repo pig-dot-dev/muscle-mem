@@ -34,8 +34,7 @@ class ImageEnv:
         self.annotated_path = "annotated.png"
 
     # ----------------------
-    # Muscle Mem tool definition.
-    
+    # Muscle Mem tool definition. 
     def embed_click_region(self, x, y):
         return self.get_region_embedding(x, y, 100)
     
