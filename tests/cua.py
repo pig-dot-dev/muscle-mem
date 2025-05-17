@@ -41,7 +41,7 @@ class ImageEnv:
             current, candidate, dim=1).item()
         return True if similarity >= 0.8 else False
 
-    @engine.tool(
+    @engine.tool_with_dep(
         pre_check=Check(
             capture=embed_click_region, 
             compare=compare_click_region
@@ -179,6 +179,7 @@ if __name__ == "__main__":
     env = ImageEnv("images/base.png")
     agent = Agent(environment=env)
     engine.set_agent(agent)
+    engine.set_dep(env)
 
     task = "click A, then B, then C, D, E, F"
 
