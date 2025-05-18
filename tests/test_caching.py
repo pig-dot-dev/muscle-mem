@@ -6,6 +6,7 @@ class TestEngineCaching:
     @pytest.fixture
     def setup(self):
         """Create and return all test components: env, agent, and engine."""
+
                 
         # Create and configure engine
         engine = Engine()
@@ -75,7 +76,7 @@ class TestEngineCaching:
         env.val = 0
         assert engine("add 1")
         assert env.val == 1
-
+# 
         # Many cache hits 0->1
         for _ in range(100):
             env.val = 0

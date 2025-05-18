@@ -215,16 +215,14 @@ class Engine:
         while True:
             if any(len(t.steps) == step_idx for t in trajectories):
                 # One trajectory has been fully executed
-                return None, True
+                yield None, True
             trajectories = self.filter_partials(trajectories)
             trajectories = self.filter_pre_checks(trajectories, step_idx)
             if not trajectories:
-                return None, False
+                yield None, False
             
             yield trajectories[0].steps[step_idx], False
             step_idx += 1
-        
-    
 
     def __call__(self, task: str) -> bool:
         # kinda dumb to model task as str for now but let's use it
