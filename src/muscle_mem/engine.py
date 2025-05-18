@@ -35,15 +35,15 @@ class Tool:
     func: Callable[P, R]
     func_name: str
     func_hash: str
-    use_dep: bool
+    is_method: bool
     pre_check: Optional[Check]
     post_check: Optional[Check]
 
-    def __init__(self, func: Callable[P, R], use_dep: bool, pre_check: Optional[Check], post_check: Optional[Check]):
+    def __init__(self, func: Callable[P, R], is_method: bool, pre_check: Optional[Check], post_check: Optional[Check]):
         self.func = func
         self.func_name = func.__name__
         self.func_hash = hash_ast(func)
-        self.use_dep = use_dep
+        self.is_method = is_method
         self.pre_check = pre_check
         self.post_check = post_check
 
@@ -54,15 +54,18 @@ class Tools():
 
     def __init__(self):
         self.tools: Dict[str, Tool] = {}
-    
+
+    def len(self):
+        return len(self.tools)
+
     def register(self, tool: Tool):
         if tool.func_name in self.tools:
             raise ValueError(f"Tool by name {tool.func_name} already registered")
 
         self.tools[tool.func_name] = tool
 
-    def requires_dep(self):
-        return any(tool.use_dep for tool in self.tools.values())
+    def has_methods(self):
+        return any(tool.is_method for tool in self.tools.values())
     
     def get(self, name: str, hash: str):
         if name not in self.tools:
@@ -78,25 +81,58 @@ class Tools():
 
 class Engine:
     def __init__(self):
-        self.tools: Tools = Tools()
-        self.dep = None
-        self.agent = None
         self.db: DB = DB()
+        self.finalized = False  
 
+        # values which must be set before use
+        self.tools: Tools = Tools()
+        self.ctx_instance = None
+        self.agent = None
+
+        # runtime state
         self.mode = "engine"
         self.recording = False
-
-        # state is kept on the engine object, so that tool decorator can access it for logging. 
-        # alternative is setting up a channel to decouple tool instrumentation and the engine
         self.current_trajectory = None 
 
-    def set_agent(self, agent: Callable):
+
+    # Builder methods
+    def set_agent(self, agent: Callable) -> 'Engine':
+        "Set the agent to be used when the engine cannot find a trajectory for a task"
+        if self.finalized:
+            raise ValueError("Engine is finalized and cannot be modified")
         self.agent = agent
+        return self
 
-    def set_dep(self,dep: Any):
+    def set_context(self, ctx_instance: Any) -> 'Engine':
         "For use in engine mode, provide an instance of the dependency used as 'self' for your method-based tools"
-        self.dep = dep
+        if self.finalized:
+            raise ValueError("Engine is finalized and cannot be modified")
+        self.ctx_instance = ctx_instance
+        return self
 
+    def finalize(self) -> 'Engine':
+        "Ensure engine is ready for use and prevent further modification"
+        if self.tools.len() == 0:
+            raise ValueError("Engine must have at least one tool. Use engine.function() or engine.method() to register tools")
+        if self.agent is None:
+            raise ValueError("Engine must have an agent to fall back to. Use engine.set_agent(your_agent)")
+        if self.ctx_instance is None and self.tools.has_methods():
+            raise ValueError("Engine expects to use method-based tools, but no runtime value was provided for 'self'. Use engine.set_context(your_dependency_instance)")
+        self.finalized = True
+        return self
+
+    # Decorators
+    def function(self, pre_check: Optional[Check] = None, post_check: Optional[Check] = None):
+        if self.finalized:
+            raise ValueError("Engine is finalized and cannot register new functions")
+        return self._register_tool(pre_check=pre_check, post_check=post_check, is_method=False)
+
+    def method(self, pre_check: Optional[Check] = None, post_check: Optional[Check] = None):
+        if self.finalized:
+            raise ValueError("Engine is finalized and cannot register new methods")
+        return self._register_tool(pre_check=pre_check, post_check=post_check, is_method=True)
+
+    # Runtime methods
     def invoke_agent(self, task: str):
         print(Fore.MAGENTA, end="")
         self.mode = "agent"
@@ -117,12 +153,9 @@ class Engine:
             
     def __call__(self, task: str) -> bool:
         # kinda dumb to model task as str for now but let's use it
-        if self.agent is None:
-            raise ValueError("Engine must have an agent to fall back to. Use engine.set_agent(your_agent)")
-        
-        # ensure dep is provided
-        if self.tools.requires_dep() and self.dep is None:
-            raise ValueError("Engine has method-based tools, but no runtime value was provided for 'self'. Use engine.set_dep(your_dep)")
+
+        if not self.finalized:
+            self.finalize()
 
         with self._record():
             self.mode = "engine"
@@ -148,8 +181,8 @@ class Engine:
                         
                         # inject dependency into args if step is a method
                         args = step.args
-                        if tool.use_dep:
-                            args = (self.dep, *args)
+                        if tool.is_method:
+                            args = (self.ctx_instance, *args)
                              
                         current = tool.pre_check.capture(*args, **step.kwargs)
                         step_passed = tool.pre_check.compare(current, step.pre_check_snapshot)
@@ -183,8 +216,8 @@ class Engine:
 
                 # inject dependency into args if step expects it
                 args = step.args
-                if tool.use_dep:
-                    args = (self.dep, *args)
+                if tool.is_method:
+                    args = (self.ctx_instance, *args)
 
                 if tool.pre_check:
                     if step.pre_check_snapshot is None:
@@ -217,21 +250,11 @@ class Engine:
             self.db.add_trajectory(self.current_trajectory)
             return True
 
-    def tool_with_dep(self, pre_check: Optional[Check] = None, post_check: Optional[Check] = None):
-        return self._register_tool(pre_check=pre_check, post_check=post_check, use_dep=True)
-
-    def tool(
-        self,
-        pre_check: Optional[Check] = None,
-        post_check: Optional[Check] = None,
-        ):
-        return self._register_tool(pre_check=pre_check, post_check=post_check, use_dep=False)
-
     def _register_tool(
         self,
         pre_check: Optional[Check] = None,
         post_check: Optional[Check] = None,
-        use_dep: bool = False,
+        is_method: bool = False,
     ):
         """
         Method decorator that applies checks before and/or after a function execution.
@@ -245,7 +268,7 @@ class Engine:
         """
 
         def decorator(func: Callable[P, R]) -> Callable[P, R]:
-            tool = Tool(func=func, use_dep=use_dep, pre_check=pre_check, post_check=post_check)
+            tool = Tool(func=func, is_method=is_method, pre_check=pre_check, post_check=post_check)
             self.tools.register(tool)
 
             @functools.wraps(func)
@@ -260,7 +283,7 @@ class Engine:
                     self.current_trajectory.steps.append(Step(
                         func_name=func.__name__,
                         func_hash=tool.func_hash,
-                        args=args[1:] if use_dep else args, # strip self arg if self is a runtime dependency
+                        args=args[1:] if is_method else args, # strip self arg if self is a runtime dependency
                         kwargs=kwargs,
                         pre_check_snapshot=snapshot
                     ))
@@ -272,7 +295,7 @@ class Engine:
                     self.current_trajectory.steps.append(Step(
                         func_name=func.__name__,
                         func_hash=tool.func_hash,
-                        args=args[1:] if use_dep else args, # strip self arg if self is a runtime dependency
+                        args=args[1:] if is_method else args, # strip self arg if self is a runtime dependency
                         kwargs=kwargs,
                         post_check_snapshot=snapshot
                     ))
