@@ -137,21 +137,20 @@ class Engine:
     def invoke_agent(self, task: str):
         print(Fore.MAGENTA, end="")
         self.mode = "agent"
-        if self.current_trajectory is None:
-            self.current_trajectory = Trajectory(task=task, steps=[])
         self.agent(task)
-        self.db.add_trajectory(self.current_trajectory)
-        self.current_trajectory = None
         print(Style.RESET_ALL, end="")
 
     @contextmanager
-    def _record(self):
+    def _record(self, task: str):
         prev_recording = self.recording
         self.recording = True
+        self.current_trajectory = Trajectory(task=task, steps=[])
         try:
             yield
         finally:
             self.recording = prev_recording
+            self.db.add_trajectory(self.current_trajectory)
+            self.current_trajectory = None
 
     def filter_partials(self, candidates: List[Trajectory]) -> List[Trajectory]:
         """If we've partially executed a trajectory, filter to only trajectories that match what we've done so far"""
@@ -220,7 +219,7 @@ class Engine:
             trajectories = self.filter_pre_checks(trajectories, step_idx)
             if not trajectories:
                 yield None, False
-            
+
             yield trajectories[0].steps[step_idx], False
             step_idx += 1
 
@@ -229,7 +228,7 @@ class Engine:
         if not self.finalized:
             self.finalize()
 
-        with self._record():
+        with self._record(task):
             self.mode = "engine"
             
             # Fetch all trajectories for this task. TODO: make smarter.
@@ -239,10 +238,9 @@ class Engine:
                 self.invoke_agent(task)
                 return False
 
-            self.current_trajectory = Trajectory(task=task, steps=[])
-
             for next_step, completed in self.step_generator(candidate_trajectories):
                 if completed:
+                    # Full cache hit 
                     return True
                 
                 if not next_step:
