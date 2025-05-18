@@ -22,7 +22,7 @@ def compare(current: Snapshot, candidate: Snapshot) -> bool:
     passed = diff <= 1
     return passed
 
-@engine.tool(pre_check=Check(capture, compare))
+@engine.function(pre_check=Check(capture, compare))
 def hello(name: str):
     time.sleep(0.1)
     print(f"hello {name}")
@@ -32,7 +32,8 @@ def agent(name: str):
         hello(name + " + " + str(i))
 
 if __name__ == "__main__":
-    engine.set_agent(agent)
+    engine = engine.set_agent(agent).finalize()
+
     # Different 0.9s tasks both are cache_misses
     cache_hit = engine("john")
     assert not cache_hit
