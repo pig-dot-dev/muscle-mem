@@ -4,7 +4,8 @@ import hashlib
 import inspect
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Callable, Dict, Optional, ParamSpec, TypeVar, Any
+from optparse import Option
+from typing import Callable, Dict, Optional, ParamSpec, TypeVar, Any, List, Tuple
 
 from colorama import Fore, Style
 
@@ -136,7 +137,8 @@ class Engine:
     def invoke_agent(self, task: str):
         print(Fore.MAGENTA, end="")
         self.mode = "agent"
-        self.current_trajectory = Trajectory(task=task, steps=[])
+        if self.current_trajectory is None:
+            self.current_trajectory = Trajectory(task=task, steps=[])
         self.agent(task)
         self.db.add_trajectory(self.current_trajectory)
         self.current_trajectory = None
@@ -150,105 +152,145 @@ class Engine:
             yield
         finally:
             self.recording = prev_recording
+
+    def filter_partials(self, candidates: List[Trajectory]) -> List[Trajectory]:
+        """If we've partially executed a trajectory, filter to only trajectories that match what we've done so far"""
+        if not self.current_trajectory or len(self.current_trajectory.steps) == 0:
+            return candidates
+
+        selected = []
+        for candidate in candidates:
+            matched_steps = 0
+            for i, step in enumerate(self.current_trajectory.steps):
+                if i >= len(candidate.steps):
+                    break
+                
+                candidate_step = candidate.steps[i]
+                if step.func_name != candidate_step.func_name:
+                    break
+                if step.func_hash != candidate_step.func_hash:
+                    break
+                if step.args != candidate_step.args:
+                    break
+                if step.kwargs != candidate_step.kwargs:
+                    break
+        
+                matched_steps += 1
+
+            if matched_steps == len(self.current_trajectory.steps):
+                selected.append(candidate)
             
+        return selected
+
+    def filter_pre_checks(self, candidates: List[Trajectory], idx: int) -> List[Trajectory]:
+        """Filter trajectories to only those where the next step passes pre-checks"""
+        selected = []
+        for candidate in candidates:
+            if idx >= len(candidate.steps):
+                continue
+            next_step = candidate.steps[idx]
+            if next_step.pre_check_snapshot is None:
+                # no pre-check, so it's safe to execute
+                selected.append(candidate)
+                continue
+            
+            tool = self.tools.get(next_step.func_name, next_step.func_hash)
+            if not tool:
+                # candidate trajectory contains a tool that's been changed or removed
+                continue
+            
+            args = next_step.args
+            if tool.is_method:
+                args = (self.ctx_instance, *args)
+            
+            current = tool.pre_check.capture(*args, **next_step.kwargs)
+            passed = tool.pre_check.compare(current, next_step.pre_check_snapshot)
+            if passed:
+                selected.append(candidate)
+        return selected
+
+    def step_generator(self, trajectories: List[Trajectory]) -> Tuple[Optional[Step], bool]:
+        "Generator that returns the next step to execute, and a completed flag if a full trajectory has been executed"
+        step_idx = 0
+        while True:
+            if any(len(t.steps) == step_idx for t in trajectories):
+                # One trajectory has been fully executed
+                return None, True
+            trajectories = self.filter_partials(trajectories)
+            trajectories = self.filter_pre_checks(trajectories, step_idx)
+            if not trajectories:
+                return None, False
+            
+            yield trajectories[0].steps[step_idx], False
+            step_idx += 1
+        
+    
+
     def __call__(self, task: str) -> bool:
         # kinda dumb to model task as str for now but let's use it
-
         if not self.finalized:
             self.finalize()
 
         with self._record():
             self.mode = "engine"
-            # Query phase
-            # TODO: would benefit from in-db filtering, distance calculations, etc
+            
+            # Fetch all trajectories for this task. TODO: make smarter.
             candidate_trajectories = self.db.fetch_trajectories(task)
             if not candidate_trajectories:
                 # Cache miss case
                 self.invoke_agent(task)
                 return False
 
-            # Selection phase
-            selected = None
-            for trajectory in candidate_trajectories:
-                passed = 0
-                for step in trajectory.steps:             
-                    if step.pre_check_snapshot is not None:
-                        # Retrieve local tool implementation for step
-                        tool = self.tools.get(step.func_name, step.func_hash)
-                        if not tool:
-                            # candidate trajectory contains a tool that's been changed or removed
-                            break
-                        
-                        # inject dependency into args if step is a method
-                        args = step.args
-                        if tool.is_method:
-                            args = (self.ctx_instance, *args)
-                             
-                        current = tool.pre_check.capture(*args, **step.kwargs)
-                        step_passed = tool.pre_check.compare(current, step.pre_check_snapshot)
-                        if not step_passed:
-                            break
-                        passed += 1
-                if passed == len(trajectory.steps):
-                    selected = trajectory
-                    break
-            if not selected:
-                # Cache miss case
-                self.invoke_agent(task)
-                return False
-            
-            # Execution phase
             self.current_trajectory = Trajectory(task=task, steps=[])
-            for step in selected.steps:
-                # Run prechecks while executing (redundant to query stage, but necessary to detect changing state)
 
-                # Retrieve local tool implementation for step
-                tool = self.tools.get(step.func_name, step.func_hash)
-                if not tool:
+            for next_step, completed in self.step_generator(candidate_trajectories):
+                if completed:
+                    return True
+                
+                if not next_step:
+                    # Cache miss case
+                    self.invoke_agent(task)
+                    return False
+                
+                next_tool = self.tools.get(next_step.func_name, next_step.func_hash)
+                if not next_tool:
                     raise ValueError("Tools lookup unexpectedly failed at runtime, despite working at query time.")
-
+                
+                # What we'll record to trajectory
                 new_step = Step(
-                    func_name=step.func_name,
-                    func_hash=step.func_hash,
-                    args=step.args,
-                    kwargs=step.kwargs,
+                    func_name=next_step.func_name,
+                    func_hash=next_step.func_hash,
+                    args=next_step.args,
+                    kwargs=next_step.kwargs,
                 )
 
-                # inject dependency into args if step expects it
-                args = step.args
-                if tool.is_method:
+                args = next_step.args
+                if next_tool.is_method:
                     args = (self.ctx_instance, *args)
 
-                if tool.pre_check:
-                    if step.pre_check_snapshot is None:
-                        raise ValueError("Retrieved trajectory is missing expected pre-check snapshot")
-
-                    current = tool.pre_check.capture(*args, **step.kwargs)
+                # Capture current state if pre-check
+                if next_tool.pre_check:
+                    current = next_tool.pre_check.capture(*args, **next_step.kwargs)
+                    if not next_tool.pre_check.compare(current, next_step.pre_check_snapshot):
+                        raise ValueError("Pre-check failed at runtime, despite working at query time.")
                     new_step.add_pre_check_snapshot(current)
-                    step_safe = tool.pre_check.compare(current, step.pre_check_snapshot)
-                    if not step_safe:
-                        raise ValueError("Retrieved trajectory is no longer safe to execute")
 
-                # Execute
+                # Execute step
                 print(Fore.GREEN, end="")
-                func = tool.func
-                _ = func(*args, **step.kwargs) # TODO: is it ok we're discarding result?
+                func = self.tools.get(next_step.func_name, next_step.func_hash).func
+                _ = func(*args, **next_step.kwargs) # TODO: is it ok we're discarding result?
                 print(Style.RESET_ALL, end="")
-
-                if tool.post_check:
-                    if step.post_check_snapshot is None:
-                        raise ValueError("Retrieved trajectory is missing expected post-check snapshot")
-                    current = tool.post_check.capture(*args, **step.kwargs)
+                
+                # Capture current state if post-check
+                if next_tool.post_check:
+                    current = next_tool.post_check.capture(*args, **next_step.kwargs)
+                    if not next_tool.post_check.compare(current, next_step.post_check_snapshot):
+                        raise ValueError("Post-check failed at runtime.")
                     new_step.add_post_check_snapshot(current)
-                    step_success = tool.post_check.compare(current, step.post_check_snapshot)
-                    if not step_success:
-                        raise ValueError("Retrieved trajectory failed post-check")
-
-                # Save to trajectory, with this run's snapshot
+                
                 self.current_trajectory.steps.append(new_step)
-            
-            self.db.add_trajectory(self.current_trajectory)
-            return True
+                
+        return True
 
     def _register_tool(
         self,
