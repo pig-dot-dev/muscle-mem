@@ -9,7 +9,7 @@ from typing import Any, Callable, Dict, List, Optional, ParamSpec, Tuple, TypeVa
 from colorama import Fore, Style
 
 from .check import Check
-from .persistence import DB
+from .persistence import DuckDB, DB
 from .types import Step, Trajectory
 
 P = ParamSpec("P")
@@ -186,6 +186,8 @@ class Engine:
 
     def filter_pre_checks(self, candidates: List[Trajectory], idx: int) -> List[Trajectory]:
         """Filter trajectories to only those where the next step passes pre-checks"""
+
+
         selected = []
         for candidate in candidates:
             if idx >= len(candidate.steps):
@@ -218,16 +220,19 @@ class Engine:
             if any(len(t.steps) == step_idx for t in trajectories):
                 # One trajectory has been fully executed
                 yield None, True
+                return
             trajectories = self.filter_partials(trajectories)
             trajectories = self.filter_pre_checks(trajectories, step_idx)
             if not trajectories:
                 yield None, False
+                return
 
             yield trajectories[0].steps[step_idx], False
             step_idx += 1
 
     def __call__(self, task: str) -> bool:
         # kinda dumb to model task as str for now but let's use it
+
         if not self.finalized:
             self.finalize()
 

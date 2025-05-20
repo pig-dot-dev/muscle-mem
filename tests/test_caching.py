@@ -1,7 +1,6 @@
 import pytest
 
-from muscle_mem import Check, Engine
-
+import muscle_mem as mm
 
 class TestEngineCaching:
     @pytest.fixture
@@ -9,7 +8,7 @@ class TestEngineCaching:
         """Create and return all test components: env, agent, and engine."""
 
         # Create and configure engine
-        engine = Engine()
+        engine = mm.Engine()
 
         # Create environment
         class Env:
@@ -23,7 +22,7 @@ class TestEngineCaching:
             def compare(current: int, candidate: int) -> bool:
                 return current == candidate
 
-            @engine.method(pre_check=Check(capture=capture, compare=compare))
+            @engine.method(pre_check=mm.Check(capture=capture, compare=compare))
             def increment(self):
                 self.val += 1
                 return self.val
@@ -78,7 +77,7 @@ class TestEngineCaching:
         assert env.val == 1
         #
         # Many cache hits 0->1
-        for _ in range(100):
+        for _ in range(1000):
             env.val = 0
             assert engine("add 1")
             assert env.val == 1
@@ -89,14 +88,14 @@ class TestEngineCaching:
         assert env.val == 2
 
         # Many cache hits 1->2
-        for _ in range(100):
+        for _ in range(1000):
             env.val = 1
             assert engine("add 1")  # cache hit 1->2
             assert env.val == 2
 
         # Return to 0->1
         # Cache stil hits
-        for _ in range(100):
+        for _ in range(1000):
             env.val = 0
             assert engine("add 1")
             assert env.val == 1
