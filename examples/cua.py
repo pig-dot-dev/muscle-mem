@@ -13,7 +13,7 @@ from openai.types.responses import ResponseInputImageParam, ResponseInputTextPar
 from openai.types.responses.response_input_item_param import Message
 from PIL import Image, ImageDraw
 from transformers import CLIPModel, CLIPProcessor
-
+import os
 from muscle_mem import Check, Engine
 
 # Load CLIP model for embeddings
@@ -28,7 +28,8 @@ class ImageEnv:
     def __init__(self, image_path: str):
         self.image_path = image_path
         self.image = Image.open(image_path)
-        self.annotated_path = "annotated.png"
+        os.makedirs("outputs", exist_ok=True)
+        self.annotated_path = os.path.join("outputs", "annotated.png")
 
     # ----------------------
     # Muscle Mem tool definition. 

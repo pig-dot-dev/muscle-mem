@@ -177,4 +177,4 @@ cython_debug/
 # Muscle-mem specific files
 
 # Outputs from running examples
-examples/annotated.png
+examples/outputs
