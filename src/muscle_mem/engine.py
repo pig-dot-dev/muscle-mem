@@ -188,10 +188,8 @@ class Engine:
 
         return selected
 
-    def filter_pre_checks(self, candidates: List[Trajectory], idx: int) -> List[Trajectory]:
+    def filter_pre_checks(self, memo: Dict, candidates: List[Trajectory], idx: int) -> List[Trajectory]:
         """Filter trajectories to only those where the next step passes pre-checks"""
-
-        memo = {}  # memoize per pass a map of: (func_name, func_hash, args, kwargs) -> res
 
         selected = []
         for candidate in candidates:
@@ -232,12 +230,18 @@ class Engine:
     def step_generator(self, task: str) -> Tuple[Optional[Step], bool]:
         "Generator that returns the next step to execute, and a completed flag if a full trajectory has been executed"
 
-        pagesize = 50
+        pagesize = 20 # todo: make configurable?
         page = 0
 
         # Fetch trajectories from db in pages, top up as needed
         with self.metrics.measure("query"):
             trajectories = self.db.fetch_trajectories(task, page=page, pagesize=pagesize)
+
+        # filter_pre_checks uses memoization to avoid redundant captures on the same step
+        # the memo was originally scoped within filter_pre_checks, 
+        # but due to db pagination, filter_pre_checks may be called many times per step,
+        # so we move the memo to this level so it can be reused across all captures for the same step
+        step_memo = {}
 
         step_idx = 0
         while True:
@@ -261,13 +265,16 @@ class Engine:
             # Apply filtering
             with self.metrics.measure("filter", "partials"):
                 trajectories = self.filter_partials(trajectories)
-            trajectories = self.filter_pre_checks(trajectories, step_idx)
+
+            trajectories = self.filter_pre_checks(step_memo, trajectories, step_idx)
+
             if not trajectories:
                 # No trajectories passed filtering, continue loop to attempt top-up
                 continue
 
             yield trajectories[0].steps[step_idx], False
             step_idx += 1
+            step_memo = {} # reset memo on step change
 
     def __call__(self, task: str) -> bool:
         # kinda dumb to model task as str for now but let's use it
