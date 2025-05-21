@@ -1,4 +1,5 @@
 import ast
+import time
 import functools
 import hashlib
 import inspect
@@ -81,6 +82,97 @@ class Tools:
 
         return tool
 
+class Metrics:
+    def __init__(self):
+        self.enabled = False
+        self.metrics = {
+            "query": {"total_time": 0, "count": 0},
+            "filter": {
+                "partials": {"total_time": 0, "count": 0},
+                "capture": {"total_time": 0, "count": 0},
+                "compare": {"total_time": 0, "count": 0}
+            },
+            "runtime": {
+                "precheck": {
+                    "capture": {"total_time": 0, "count": 0},
+                    "compare": {"total_time": 0, "count": 0}
+                },
+                "postcheck": {
+                    "capture": {"total_time": 0, "count": 0},
+                    "compare": {"total_time": 0, "count": 0}
+                }
+            }
+        }
+    
+    def enable(self):
+        self.enabled = True
+    
+    def disable(self):
+        self.enabled = False
+    
+    def report(self):
+        """Print a pretty-printed JSON report of all metrics."""
+        if not self.enabled:
+            return
+        
+        # Create a copy of metrics with averages and formatted times added
+        import copy
+        import json
+        
+        report_metrics = copy.deepcopy(self.metrics)
+        
+        # Format time in appropriate units and add averages
+        def format_time(seconds):
+            """Format time in appropriate units based on magnitude."""
+            if seconds >= 1.0:
+                return f"{seconds:.4f}s"  # seconds
+            elif seconds >= 0.001:
+                return f"{seconds * 1000:.4f}ms"  # milliseconds
+            else:
+                return f"{seconds * 1000000:.4f}us"  # microseconds
+        
+        def process_metrics(metrics_dict):
+            for key, value in metrics_dict.items():
+                if isinstance(value, dict):
+                    if "total_time" in value and "count" in value:
+                        # Store original time values for calculation
+                        raw_time = value["total_time"]
+                        
+                        # Format the time value
+                        value["total_time"] = format_time(raw_time)
+                        
+                        # Calculate and format average if count > 0
+                        if value["count"] > 0:
+                            avg_time = raw_time / value["count"]
+                            value["avg_time"] = format_time(avg_time)
+                    else:
+                        process_metrics(value)
+        
+        process_metrics(report_metrics)
+        print(json.dumps(report_metrics, indent=4))
+
+    def reset(self):
+        """Reset all metrics to zero."""
+        self.__init__()
+    
+    @contextmanager
+    def measure(self, *path):
+        if not self.enabled:
+            yield
+            return
+        
+        start = time.time()
+        try:
+            yield
+        finally:
+            # Navigate to the correct spot in the metrics dictionary
+            current = self.metrics
+            for part in path[:-1]:
+                current = current[part]
+            
+            # Update time and count
+            current[path[-1]]["total_time"] += time.time() - start
+            current[path[-1]]["count"] += 1
 
 class Engine:
     def __init__(self):
@@ -96,6 +188,9 @@ class Engine:
         self.mode = "engine"
         self.recording = False
         self.current_trajectory = None
+
+        # performance
+        self.metrics = Metrics()
 
     # Builder methods
     def set_agent(self, agent: Callable) -> "Engine":
@@ -207,25 +302,51 @@ class Engine:
             if tool.is_method:
                 args = (self.ctx_instance, *args)
 
-            current = tool.pre_check.capture(*args, **next_step.kwargs)
-            passed = tool.pre_check.compare(current, next_step.pre_check_snapshot)
+            with self.metrics.measure("filter", "capture"):
+                current = tool.pre_check.capture(*args, **next_step.kwargs)
+            with self.metrics.measure("filter", "compare"):
+                passed = tool.pre_check.compare(current, next_step.pre_check_snapshot)
             if passed:
                 selected.append(candidate)
         return selected
 
-    def step_generator(self, trajectories: List[Trajectory]) -> Tuple[Optional[Step], bool]:
+    def step_generator(self, task: str) -> Tuple[Optional[Step], bool]:
         "Generator that returns the next step to execute, and a completed flag if a full trajectory has been executed"
+
+        pagesize = 10
+        page = 0
+
+        # Fetch trajectories from db in pages, top up as needed
+        with self.metrics.measure("query"):
+            trajectories = self.db.fetch_trajectories(task, page=page, pagesize=pagesize)
+
         step_idx = 0
         while True:
+
+            # Attempt to top up trajectories if we've run out
+            if not trajectories:
+                with self.metrics.measure("query"):
+                    page += 1
+                    trajectories = self.db.fetch_trajectories(task, page=page, pagesize=pagesize)
+
+                if not trajectories:
+                    # We've reached the end of dataset, signal cache-miss
+                    yield None, False
+                    return
+
+            # Check if any trajectory has been fully executed
             if any(len(t.steps) == step_idx for t in trajectories):
                 # One trajectory has been fully executed
                 yield None, True
                 return
-            trajectories = self.filter_partials(trajectories)
+
+            # Apply filtering
+            with self.metrics.measure("filter", "partials"):
+                trajectories = self.filter_partials(trajectories)
             trajectories = self.filter_pre_checks(trajectories, step_idx)
             if not trajectories:
-                yield None, False
-                return
+                # No trajectories passed filtering, continue loop to attempt top-up
+                continue
 
             yield trajectories[0].steps[step_idx], False
             step_idx += 1
@@ -239,14 +360,7 @@ class Engine:
         with self._record(task):
             self.mode = "engine"
 
-            # Fetch all trajectories for this task. TODO: make smarter.
-            candidate_trajectories = self.db.fetch_trajectories(task)
-            if not candidate_trajectories:
-                # Cache miss case
-                self.invoke_agent(task)
-                return False
-
-            for next_step, completed in self.step_generator(candidate_trajectories):
+            for next_step, completed in self.step_generator(task):
                 if completed:
                     # Full cache hit
                     return True
@@ -274,9 +388,11 @@ class Engine:
 
                 # Capture current state if pre-check
                 if next_tool.pre_check:
-                    current = next_tool.pre_check.capture(*args, **next_step.kwargs)
-                    if not next_tool.pre_check.compare(current, next_step.pre_check_snapshot):
-                        raise ValueError("Pre-check failed at runtime, despite working at query time.")
+                    with self.metrics.measure("runtime", "precheck", "capture"):
+                        current = next_tool.pre_check.capture(*args, **next_step.kwargs)
+                    with self.metrics.measure("runtime", "precheck", "compare"):
+                        if not next_tool.pre_check.compare(current, next_step.pre_check_snapshot):
+                            raise ValueError("Pre-check failed at runtime, despite working at query time.")
                     new_step.add_pre_check_snapshot(current)
 
                 # Execute step
@@ -287,9 +403,11 @@ class Engine:
 
                 # Capture current state if post-check
                 if next_tool.post_check:
-                    current = next_tool.post_check.capture(*args, **next_step.kwargs)
-                    if not next_tool.post_check.compare(current, next_step.post_check_snapshot):
-                        raise ValueError("Post-check failed at runtime.")
+                    with self.metrics.measure("runtime", "postcheck", "capture"):
+                        current = next_tool.post_check.capture(*args, **next_step.kwargs)
+                    with self.metrics.measure("runtime", "postcheck", "compare"):
+                        if not next_tool.post_check.compare(current, next_step.post_check_snapshot):
+                            raise ValueError("Post-check failed at runtime.")
                     new_step.add_post_check_snapshot(current)
 
                 self.current_trajectory.steps.append(new_step)

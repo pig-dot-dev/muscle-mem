@@ -67,6 +67,8 @@ class TestEngineCaching:
         """Test basic cache miss and hit scenarios."""
         env, _, engine = setup
 
+        engine.metrics.enable()
+
         # Initial cache miss 0->1
         assert env.val == 0
         assert not engine("add 1")
@@ -99,6 +101,8 @@ class TestEngineCaching:
             env.val = 0
             assert engine("add 1")
             assert env.val == 1
+        
+        engine.metrics.report()
 
     def test_multi_step(self, setup):
         env, _, engine = setup
