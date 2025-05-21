@@ -10,7 +10,7 @@ from typing import Any, Callable, Dict, List, Optional, ParamSpec, Tuple, TypeVa
 from colorama import Fore, Style
 
 from .check import Check
-from .persistence import DuckDB, DB
+from .persistence import DB
 from .types import Step, Trajectory
 
 P = ParamSpec("P")
