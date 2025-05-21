@@ -16,7 +16,6 @@ from .types import Step, Trajectory
 P = ParamSpec("P")
 R = TypeVar("R")
 
-
 def hash_ast(func):
     # Hashes the ast of a function, to raise errors if implementation changes from persisted tools
     source = inspect.getsource(func)
