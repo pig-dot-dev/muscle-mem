@@ -172,3 +172,9 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+#
+# Muscle-mem specific files
+
+# Outputs from running examples
+examples/annotated.png
