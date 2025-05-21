@@ -138,7 +138,7 @@ Each Check encapsulates:
 
 ```python
 Check(
-	capture: Callable[P, T],
+    capture: Callable[P, T],
     compare: Callable[[T, T], Union[bool, float]],
 ):
 ```
