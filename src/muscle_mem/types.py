@@ -40,6 +40,15 @@ class Step:
     def add_post_check_snapshot(self, snapshot: Any):
         self.post_check_snapshot = snapshot
 
+    def __repr__(self):
+        return f"Step(func_name={self.func_name}, func_hash={self.func_hash}, args={self.args}, kwargs={self.kwargs})"
+
+    def hash_signature(self):
+        # a fingerprint used for memoizing check operations
+        immutable_args = tuple(tuple(arg) if isinstance(arg, list) else arg for arg in self.args)
+        immutable_kwargs = frozenset(self.kwargs.items())
+        return hash((self.func_name, self.func_hash, immutable_args, immutable_kwargs))
+
 
 # Datatype to be stored in DB as a trajectory.
 @dataclass

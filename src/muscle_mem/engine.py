@@ -191,6 +191,8 @@ class Engine:
     def filter_pre_checks(self, candidates: List[Trajectory], idx: int) -> List[Trajectory]:
         """Filter trajectories to only those where the next step passes pre-checks"""
 
+        memo = {} # memoize per pass a map of: (func_name, func_hash, args, kwargs) -> res
+
         selected = []
         for candidate in candidates:
             if idx >= len(candidate.steps):
@@ -206,22 +208,31 @@ class Engine:
                 # candidate trajectory contains a tool that's been changed or removed
                 continue
 
-            args = next_step.args
-            if tool.is_method:
-                args = (self.ctx_instance, *args)
+            # memoize redundant captures (assumed safe as filter_pre_checks is run at a single point in time)
+            key = next_step.hash_signature()
+            if key in memo:
+                current = memo[key]
+            else:
+                # first time we've seen this configuration, run capture 
+                args = next_step.args
+                if tool.is_method:
+                    args = (self.ctx_instance, *args)
+                with self.metrics.measure("filter", "capture"):
+                    current = tool.pre_check.capture(*args, **next_step.kwargs)
+                memo[key] = current
 
-            with self.metrics.measure("filter", "capture"):
-                current = tool.pre_check.capture(*args, **next_step.kwargs)
             with self.metrics.measure("filter", "compare"):
                 passed = tool.pre_check.compare(current, next_step.pre_check_snapshot)
+
             if passed:
                 selected.append(candidate)
+
         return selected
 
     def step_generator(self, task: str) -> Tuple[Optional[Step], bool]:
         "Generator that returns the next step to execute, and a completed flag if a full trajectory has been executed"
 
-        pagesize = 10
+        pagesize = 50
         page = 0
 
         # Fetch trajectories from db in pages, top up as needed
