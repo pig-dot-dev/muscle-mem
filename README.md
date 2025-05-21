@@ -68,7 +68,7 @@ engine("do some task") # cache hit
 
 ## Tool Instrumentation
 
-Decorators are used to instrument action-taking tools, so that the engine can record what actions your agent takes.
+Decorators are used to instrument action-taking tools, so that the engine can record actions as your agent takes them.
 
 ### Functions
 
