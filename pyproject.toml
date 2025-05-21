@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "muscle-mem"
-version = "0.0.1"
+version = "0.0.2"
 authors = [
     { name = "Erik Dunteman", email = "erikdunteman@gmail.com" },
 ]
@@ -20,8 +20,6 @@ packages = ["src"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/muscle_mem"] 
-
-# .[dev]
 
 [project.optional-dependencies]
 dev = [

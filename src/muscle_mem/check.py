@@ -5,10 +5,10 @@ P = ParamSpec("P")  # The wrapped function's parameter types
 R = TypeVar("R")  # The wrapped function's return type
 
 # Datatype to be stored in DB as a point-in-time snapshot.
-S = TypeVar("S")  # The snapshot type (should be a dataclass or Pydantic model)
+T = TypeVar("T")  # The snapshot type (should be a dataclass or Pydantic model)
 
 
-class Check(Generic[P, S]):
+class Check(Generic[P, T]):
     """
     Checks ensure it's safe to proceed with cached trajectories.
     They may be applied before, or after, a tool call.
@@ -16,8 +16,8 @@ class Check(Generic[P, S]):
 
     def __init__(
         self,
-        capture: Callable[P, S],
-        compare: Callable[[S, S], Union[bool, float]],
+        capture: Callable[P, T],
+        compare: Callable[[T, T], Union[bool, float]],
     ):
         """
         Initialize a Check with capture and compare callbacks.

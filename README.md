@@ -56,7 +56,7 @@ It manages its own cache of previous trajectories, and determines when to invoke
 from muscle_mem import Engine
 
 engine = Engine()
-engine.set_agent(your_agent)
+engine.set_agent(your_agent).finalize()
 
 # your agent is independently callable
 your_agent("do some task")
@@ -66,21 +66,66 @@ engine("do some task")
 engine("do some task") # cache hit
 ```
 
-## Tool
+## Tool Instrumentation
 
-The `@engine.tool` decorator instruments action-taking tools, so their invocations are recorded to the engine.
+Decorators are used to instrument action-taking tools, so that the engine can record what actions your agent takes.
+
+### Functions
+
+Use the `@engine.function` decorator to instrument a simple function tool:
 
 ```python
 from muscle_mem import Engine
 
 engine = Engine()
 
-@engine.tool()
+@engine.function()
 def hello(name: str):
 	print(f"hello {name}!")
 	
 hello("world") # invocation of hello is stored, with arg name="world"
 ```
+
+### Methods
+
+Use the `@engine.method` decorator to instrument a method attached to an object.
+
+This allows for dependency injection of stateful API clients via the `self` argument, such as `self.db.get_user(id)` or `self.model.generate(prompt)`.
+
+
+```python
+from muscle_mem import Engine
+
+engine = Engine()
+
+class SomeClient:
+   @engine.method()
+   def hello(self, name: str):
+       print(f"hello {name}!")
+
+client = SomeClient()
+
+client.hello("world") # invocation of SomeClient.hello is stored, with arg name="world"
+```
+
+Note that because runtime objects (`self`) cannot be serialized, `self` is omitted from the trajectory.
+
+For the engine to replay a method-based tool, it must be explicitly passed an instance of the object to re-inject as `self`.
+
+Use `engine.set_context()` to provide the runtime object to the engine.
+
+```python 
+engine = (
+    engine
+    .set_agent(your_agent)
+    .set_context(client) # your client object will be injected as self into SomeClient.hello
+    .finalize()
+)
+engine("say hello world!")
+```
+
+`engine.finalize()` is an optional check to ensure you've provided all dependencies to the engine before using it.
+
 
 ## Check
 
@@ -93,12 +138,12 @@ Each Check encapsulates:
 
 ```python
 Check(
-	capture: Callable[P, T],
-        compare: Callable[[T, T], Union[bool, float]],
+    capture: Callable[P, T],
+    compare: Callable[[T, T], Union[bool, float]],
 ):
 ```
 
-You can attach Checks to each tool `@engine.tool` to enforce cache validation. 
+You can attach Checks to each tool `@engine.function` (or `@engine.method`) to enforce cache validation. 
 
 This can be done before the tool call as a precheck (also used for query time validation), or after a tool call as a postcheck. 
 
@@ -118,7 +163,7 @@ def compare(current: T, candidate: T) -> bool:
     return passed
 
 # decorate our tool with a precheck
-@engine.tool(pre_check=Check(capture, compare))
+@engine.function(pre_check=Check(capture, compare))
 def hello(name: str):
     time.sleep(0.1)
     print(f"hello {name}")
@@ -154,7 +199,7 @@ def compare(current: T, candidate: T) -> bool:
     return passed
 
 # decorate our tool with a precheck
-@engine.tool(pre_check=Check(capture, compare))
+@engine.function(pre_check=Check(capture, compare))
 def hello(name: str):
     time.sleep(0.1)
     print(f"hello {name}")
@@ -164,7 +209,7 @@ def agent(name: str):
    for i in range(9):
         hello(name + " + " + str(i))
 
-engine.set_agent(agent)
+engine.set_agent(agent).finalize()
 
 # Run once
 cache_hit = engine("erik")
