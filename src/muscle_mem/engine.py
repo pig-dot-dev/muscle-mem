@@ -191,7 +191,7 @@ class Engine:
     def filter_pre_checks(self, candidates: List[Trajectory], idx: int) -> List[Trajectory]:
         """Filter trajectories to only those where the next step passes pre-checks"""
 
-        memo = {} # memoize per pass a map of: (func_name, func_hash, args, kwargs) -> res
+        memo = {}  # memoize per pass a map of: (func_name, func_hash, args, kwargs) -> res
 
         selected = []
         for candidate in candidates:
@@ -213,7 +213,7 @@ class Engine:
             if key in memo:
                 current = memo[key]
             else:
-                # first time we've seen this configuration, run capture 
+                # first time we've seen this configuration, run capture
                 args = next_step.args
                 if tool.is_method:
                     args = (self.ctx_instance, *args)
