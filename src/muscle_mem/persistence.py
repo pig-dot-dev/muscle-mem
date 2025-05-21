@@ -1,5 +1,7 @@
-from typing import List
+from typing import Dict, List
+
 from .types import Trajectory
+
 
 # Currently minimal, in-memory, and highly unoptimized
 # Suggestions welcome for database implementations
@@ -15,4 +17,4 @@ class DB:
     def fetch_trajectories(self, task: str, page: int = 0, pagesize: int = 20) -> List[Trajectory]:
         if task not in self.trajectories:
             return []
-        return self.trajectories[task][page * pagesize:(page + 1) * pagesize]
+        return self.trajectories[task][page * pagesize : (page + 1) * pagesize]

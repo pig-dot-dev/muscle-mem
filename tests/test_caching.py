@@ -2,6 +2,7 @@ import pytest
 
 import muscle_mem as mm
 
+
 class TestEngineCaching:
     @pytest.fixture
     def setup(self):
@@ -101,7 +102,7 @@ class TestEngineCaching:
             env.val = 0
             assert engine("add 1")
             assert env.val == 1
-        
+
         engine.metrics.report()
 
     def test_multi_step(self, setup):
