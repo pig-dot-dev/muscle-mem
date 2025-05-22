@@ -282,7 +282,7 @@ class Engine:
 
         # Temp: sort and join tags for task name
         # TODO: decide if we care about match on all tags, or just one tag
-        task = "_".join(sorted(tags))
+        task = "_".join(sorted([str(t).lower() for t in tags]))
 
         with self._record(task):
             self.mode = "engine"
