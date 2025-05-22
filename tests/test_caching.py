@@ -68,39 +68,41 @@ class TestEngineCaching:
         """Test basic cache miss and hit scenarios."""
         env, _, engine = setup
 
+        tags = ["increment once"] # doesn't matter what this is, can be any value
+
         engine.metrics.enable()
 
         # Initial cache miss 0->1
         assert env.val == 0
-        assert not engine("add 1")
+        assert not engine("add 1", tags=tags)
         assert env.val == 1
 
         env.val = 0
-        assert engine("add 1")
+        assert engine("add 1", tags=tags)
         assert env.val == 1
         #
         # Many cache hits 0->1
         for _ in range(1000):
             env.val = 0
-            assert engine("add 1")
+            assert engine("add 1", tags=tags)
             assert env.val == 1
 
         # Initial cache miss 1->2
         env.val = 1
-        assert not engine("add 1")
+        assert not engine("add 1", tags=tags)
         assert env.val == 2
 
         # Many cache hits 1->2
         for _ in range(1000):
             env.val = 1
-            assert engine("add 1")  # cache hit 1->2
+            assert engine("add 1", tags=tags)  # cache hit 1->2
             assert env.val == 2
 
         # Return to 0->1
         # Cache stil hits
         for _ in range(1000):
             env.val = 0
-            assert engine("add 1")
+            assert engine("add 1", tags=tags)
             assert env.val == 1
 
         engine.metrics.report()
@@ -108,21 +110,49 @@ class TestEngineCaching:
     def test_multi_step(self, setup):
         env, _, engine = setup
 
+        tags = ["increment twice"]
+
         # warm cache 0->2
         env.val = 0
-        assert not engine("add 2")
+        assert not engine("add 2", tags=tags)
         assert env.val == 2
 
         # cache hit 0->2
         env.val = 0
-        assert engine("add 2")
+        assert engine("add 2", tags=tags)
         assert env.val == 2
 
-        # note: this test currently fails
-        # 0->2 is cached, but steps include captured envs (0, 1, 2)
-        # when it's retrieved as a candidate, the current capture() yields 0
-        # so compare passes on 0th step, but fails on 1st and 2nd
+    def test_multi_tags(self, setup):
+        env, _, engine = setup
 
-        # for actions that influence subsequent captures,
-        # it's only valid to query against the first step of a trajectory
-        # and only precheck every step at runtime
+        tags = ["yee"]
+        env.val = 0
+        assert not engine("add 1", tags=tags)
+        assert env.val == 1
+
+        env.val = 0
+        assert engine("add 1", tags=tags)
+        assert env.val == 1
+
+        tags = ["haw"]
+        env.val = 0
+        assert not engine("add 1", tags=tags)
+        assert env.val == 1
+
+        env.val = 0
+        assert engine("add 1", tags=tags)
+        assert env.val == 1
+        
+        tags = ["yee", "haw"]
+        env.val = 0
+        assert not engine("add 1", tags=tags)
+        assert env.val == 1
+
+        env.val = 0
+        assert engine("add 1", tags=tags)
+        assert env.val == 1
+        
+        tags = ["yee"] # revisit
+        env.val = 0
+        assert engine("add 1", tags=tags)
+        assert env.val == 1

@@ -141,10 +141,10 @@ class Engine:
         return self._register_tool(pre_check=pre_check, post_check=post_check, is_method=True)
 
     # Runtime methods
-    def invoke_agent(self, task: str):
+    def invoke_agent(self, *args, **kwargs):
         print(Fore.MAGENTA, end="")
         self.mode = "agent"
-        self.agent(task)
+        self.agent(*args, **kwargs)
         print(Style.RESET_ALL, end="")
 
     @contextmanager
@@ -276,11 +276,13 @@ class Engine:
             step_idx += 1
             step_memo = {} # reset memo on step change
 
-    def __call__(self, task: str) -> bool:
-        # kinda dumb to model task as str for now but let's use it
-
+    def __call__(self, *args, tags: List[str], **kwargs) -> bool:
         if not self.finalized:
             self.finalize()
+
+        # Temp: sort and join tags for task name
+        # TODO: decide if we care about match on all tags, or just one tag
+        task = "_".join(sorted(tags))
 
         with self._record(task):
             self.mode = "engine"
@@ -292,7 +294,7 @@ class Engine:
 
                 if not next_step:
                     # Cache miss case
-                    self.invoke_agent(task)
+                    self.invoke_agent(*args, **kwargs)
                     return False
 
                 next_tool = self.tools.get(next_step.func_name, next_step.func_hash)
