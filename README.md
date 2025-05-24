@@ -227,7 +227,7 @@ assert not cache_hit
 
 For a more real example, see a computer-use agent implementation:
 
-[https://github.com/pig-dot-dev/muscle-mem/blob/main/tests/cua.py](https://github.com/pig-dot-dev/muscle-mem/blob/main/tests/cua.py)
+[https://github.com/pig-dot-dev/muscle-mem/blob/main/examples/cua.py](https://github.com/pig-dot-dev/muscle-mem/blob/main/examples/cua.py)
 
 ---
 
