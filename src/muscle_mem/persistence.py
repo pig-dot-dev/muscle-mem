@@ -1,4 +1,4 @@
-from typing import Dict, Iterator, List, Set
+from typing import Dict, Iterator, List, Set, Tuple
 
 from .types import Trajectory
 
@@ -27,7 +27,7 @@ class DB:
 
 class TaskIndex:
     entries: List[Trajectory]
-    index: Dict[any, Set[int]]  # Index key value -> list of indices in entries
+    index: Dict[Tuple[int, any], Set[int]]  # Index key value -> list of indices in entries
 
     def __init__(self):
         self.entries = []
@@ -36,10 +36,13 @@ class TaskIndex:
     def add(self, trajectory: Trajectory, index_keys: List[any] = None):
         entries_len = len(self.entries)
         self.entries.append(trajectory)
-        for key in index_keys:
-            if key not in self.index:
-                self.index[key] = set()
-            self.index[key].add(entries_len)
+
+        # Enumerate the index keys, storing (i, value) pairs
+        for i, key in enumerate(index_keys or []):
+            i_key = (i, key)
+            if i_key not in self.index:
+                self.index[i_key] = set()
+            self.index[i_key].add(entries_len)
 
     def scan_matching(self, all_keys: List[any]) -> Iterator[Trajectory]:
         """
@@ -49,10 +52,12 @@ class TaskIndex:
         if not all_keys or len(all_keys) == 0:
             return iter(self.entries)
 
-        indicies = self.index.get(all_keys[0], set())
-        for key in all_keys[1:]:
-            if key not in self.index:
-                return iter([])
+        keys = [(i, key) for i, key in enumerate(all_keys)]
+        if not all(k in self.index for k in keys):
+            return iter([])
+
+        indicies = self.index.get(keys[0], set())
+        for key in keys[1:]:
             indicies &= self.index[key]
 
         return (self.entries[i] for i in indicies)
