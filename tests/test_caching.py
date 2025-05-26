@@ -23,7 +23,12 @@ class TestEngineCaching:
             def compare(current: int, candidate: int) -> bool:
                 return current == candidate
 
-            @engine.method(pre_check=mm.Check(capture=capture, compare=compare))
+            @staticmethod
+            def index_keys(capture: int) -> list[int]:
+                """Index by the captured value."""
+                return [capture]
+
+            @engine.method(pre_check=mm.Check(capture=capture, compare=compare, index_keys=index_keys))
             def increment(self):
                 self.val += 1
                 return self.val

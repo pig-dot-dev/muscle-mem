@@ -19,6 +19,11 @@ class DB:
             return []
         return self.trajectories[task][page * pagesize : (page + 1) * pagesize]
 
+    def scan_matching(self, task: str, all_keys: List[any]) -> Iterator[Trajectory]:
+        if task not in self.trajectories:
+            return iter([])
+        return self.trajectories[task].scan_matching(all_keys)
+
 
 class TaskIndex:
     entries: List[Trajectory]

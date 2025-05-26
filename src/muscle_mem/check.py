@@ -27,6 +27,10 @@ class Check(Generic[P, T]):
             capture: Function to read relevant features from the environment, persisted in DB as a point-in-time snapshot.
             compare: Pure function to compare current snapshot with a candidate snapshot from the DB. May be run in parallel against multiple candidates.
             index_keys: Optional function to extract keys for indexing the snapshot in the database.
+
+        Invariants:
+            - If index_keys(T) != index_keys(T'), then compare(T, T') _must_ return False.
+            - If index_keys(T) == index_keys(T'), then compare(T, T') _may_ return True or False.
         """
 
         self.capture = capture
