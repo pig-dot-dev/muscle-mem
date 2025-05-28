@@ -11,7 +11,7 @@ from colorama import Fore, Style
 from .check import Check
 from .metrics import Metrics
 from .persistence import DB
-from .types import Step, Trajectory
+from .types import Step, Trajectory, Arg
 
 P = ParamSpec("P")
 R = TypeVar("R")
@@ -97,6 +97,7 @@ class Engine:
         self.mode = "engine"
         self.recording = False
         self.current_trajectory = None
+        self.current_params = None
 
         # performance
         self.metrics = Metrics()
@@ -132,7 +133,7 @@ class Engine:
     # Decorators
     def function(self, pre_check: Optional[Check] = None, post_check: Optional[Check] = None):
         if self.finalized:
-            raise ValueError("Engine is finalized and cannot register new functions")
+            raise ValueError("Engine is finalized and cannot register new unctions")
         return self._register_tool(pre_check=pre_check, post_check=post_check, is_method=False)
 
     def method(self, pre_check: Optional[Check] = None, post_check: Optional[Check] = None):
@@ -148,10 +149,11 @@ class Engine:
         print(Style.RESET_ALL, end="")
 
     @contextmanager
-    def _record(self, task: str):
+    def _record(self, task: str, params: Optional[Dict[str, Any]] = None):
         prev_recording = self.recording
         self.recording = True
         self.current_trajectory = Trajectory(task=task, steps=[])
+        self.current_params = params
         try:
             yield
         finally:
@@ -276,13 +278,13 @@ class Engine:
             step_idx += 1
             step_memo = {} # reset memo on step change
 
-    def __call__(self, task: str) -> bool:
+    def __call__(self, task: str, params: Optional[Dict[str, Any]] = None) -> bool:
         # kinda dumb to model task as str for now but let's use it
 
         if not self.finalized:
             self.finalize()
 
-        with self._record(task):
+        with self._record(task, params):
             self.mode = "engine"
 
             for next_step, completed in self.step_generator(task):
@@ -307,14 +309,31 @@ class Engine:
                     kwargs=next_step.kwargs,
                 )
 
-                args = next_step.args
+                # Convert args to actual values
+                arg_list = []
+                for arg in next_step.args:
+                    if arg.is_param:
+                        arg_list.append(self.current_params[arg.param_key])
+                    else:
+                        arg_list.append(arg.static_value)
+                args = tuple(arg_list)
+
+                # Convert kwargs to actual values
+                kwargs = {}
+                for key, arg in next_step.kwargs.items():
+                    if arg.is_param:
+                        kwarg_list[key] = self.current_params[arg.param_key]
+                    else:
+                        kwarg_list[key] = arg.static_value
+
+                # Add self arg
                 if next_tool.is_method:
                     args = (self.ctx_instance, *args)
 
                 # Capture current state if pre-check
                 if next_tool.pre_check:
                     with self.metrics.measure("runtime", "precheck", "capture"):
-                        current = next_tool.pre_check.capture(*args, **next_step.kwargs)
+                        current = next_tool.pre_check.capture(*args, **kwargs)
                     with self.metrics.measure("runtime", "precheck", "compare"):
                         if not next_tool.pre_check.compare(current, next_step.pre_check_snapshot):
                             raise ValueError("Pre-check failed at runtime, despite working at query time.")
@@ -323,13 +342,13 @@ class Engine:
                 # Execute step
                 print(Fore.GREEN, end="")
                 func = self.tools.get(next_step.func_name, next_step.func_hash).func
-                _ = func(*args, **next_step.kwargs)  # TODO: is it ok we're discarding result?
+                _ = func(*args, **kwargs)  # TODO: is it ok we're discarding result?
                 print(Style.RESET_ALL, end="")
 
                 # Capture current state if post-check
                 if next_tool.post_check:
                     with self.metrics.measure("runtime", "postcheck", "capture"):
-                        current = next_tool.post_check.capture(*args, **next_step.kwargs)
+                        current = next_tool.post_check.capture(*args, **kwargs)
                     with self.metrics.measure("runtime", "postcheck", "compare"):
                         if not next_tool.post_check.compare(current, next_step.post_check_snapshot):
                             raise ValueError("Post-check failed at runtime.")
@@ -366,31 +385,58 @@ class Engine:
                     # Don't trace
                     return func(*args, **kwargs)
 
+                # Capture env features before call
+                pre_check_snapshot = None
                 if pre_check:
-                    snapshot = pre_check.capture(*args, **kwargs)
-                    self.current_trajectory.steps.append(
-                        Step(
-                            func_name=func.__name__,
-                            func_hash=tool.func_hash,
-                            args=args[1:] if is_method else args,  # strip self arg if self is a runtime dependency
-                            kwargs=kwargs,
-                            pre_check_snapshot=snapshot,
-                        )
-                    )
+                    pre_check_snapshot = pre_check.capture(*args, **kwargs)
 
+                # Execute function, unmodified 
                 result = func(*args, **kwargs)
 
+                # Capture env features after call
+                post_check_snapshot = None
                 if post_check:
-                    snapshot = post_check.capture(*args, **kwargs)
-                    self.current_trajectory.steps.append(
-                        Step(
-                            func_name=func.__name__,
-                            func_hash=tool.func_hash,
-                            args=args[1:] if is_method else args,  # strip self arg if self is a runtime dependency
-                            kwargs=kwargs,
-                            post_check_snapshot=snapshot,
-                        )
+                    post_check_snapshot = post_check.capture(*args, **kwargs)
+
+                # Record to engine
+                # strip self arg if self is a runtime dependency
+                args = args[1:] if is_method else args
+
+                # Convert args to Arg objects (for parameterization)
+                arg_list = []
+                for val in args:
+                    # assume static by default
+                    arg = Arg(is_param=False, static_value=val) 
+                    if self.current_params:
+                        for k, v in self.current_params.items():
+                            if val == v:
+                                # we've detected a top level parameter has been used in the args, strip static value and replace with param key
+                                arg = Arg(is_param=True, param_key=k, static_value=None)
+                    arg_list.append(arg)
+
+                kwarg_list = {}
+                for key, val in kwargs.items():
+                    # assume static by default
+                    arg = Arg(is_param=False, static_value=val) 
+                    if self.current_params:
+                        for k, v in self.current_params.items():
+                            if val == v:
+                                # we've detected a top level parameter has been used in the kwargs, strip static value and replace with param key
+                                arg = Arg(is_param=True, param_key=k, static_value=None)
+                    kwarg_list[key] = arg
+
+                # Record step 
+                self.current_trajectory.steps.append(
+                    Step(
+                        func_name=func.__name__,
+                        func_hash=tool.func_hash,
+                        args=arg_list,  
+                        kwargs=kwarg_list,
+                        pre_check_snapshot=pre_check_snapshot,
+                        post_check_snapshot=post_check_snapshot,
                     )
+                )
+            
                 return result
 
             return wrapper

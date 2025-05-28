@@ -6,12 +6,20 @@ R = TypeVar("R")
 S = TypeVar("S")
 
 
+# Datatype for args and kwargs
+@dataclass(frozen=True) 
+class Arg:
+    is_param: bool
+    param_key: Optional[str] = None # Lookup key, if parametric
+    static_value: Any = None # Static value, if not parametric
+
+
 # Datatype to be stored in DB as a point-in-time snapshot.
 class Step:
     func_name: str
     func_hash: str  # used to verify implementation of function has not changed. Only works one stack deep.
-    args: List[Any]  # Critical assumption: the args and kwargs are serializeable and directly from the llm, therefore storable
-    kwargs: Dict[str, Any]
+    args: List[Arg]  # Critical assumption: the args and kwargs are serializeable and directly from the llm, therefore storable
+    kwargs: Dict[str, Arg]
     pre_check_snapshot: Optional[Any] = None
     post_check_snapshot: Optional[Any] = None
 
@@ -19,8 +27,8 @@ class Step:
         self,
         func_name: str,
         func_hash: str,
-        args: List[Any],
-        kwargs: Dict[str, Any],
+        args: List[Arg],
+        kwargs: Dict[str, Arg],
         pre_check_snapshot: Optional[Any] = None,
         post_check_snapshot: Optional[Any] = None,
     ):
