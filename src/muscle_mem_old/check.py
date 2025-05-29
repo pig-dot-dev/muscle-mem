@@ -7,6 +7,7 @@ R = TypeVar("R")  # The wrapped function's return type
 # Datatype to be stored in DB as a point-in-time snapshot.
 T = TypeVar("T")  # The snapshot type (should be a dataclass or Pydantic model)
 
+
 class Check(Generic[P, T]):
     """
     Checks ensure it's safe to proceed with cached trajectories.
@@ -25,5 +26,6 @@ class Check(Generic[P, T]):
             capture: Function to read relevant features from the environment, persisted in DB as a point-in-time snapshot.
             compare: Pure function to compare current snapshot with a candidate snapshot from the DB. May be run in parallel against multiple candidates.
         """
+
         self.capture = capture
         self.compare = compare
