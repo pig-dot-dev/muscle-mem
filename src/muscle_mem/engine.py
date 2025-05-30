@@ -1,6 +1,6 @@
 import functools
 from contextlib import contextmanager
-from typing import Any, Callable, Dict, List, Optional, ParamSpec, Tuple, TypeVar, Set 
+from typing import Any, Callable, Dict, List, Optional, ParamSpec, Set, Tuple, TypeVar
 
 from colorama import Fore, Style
 
@@ -14,36 +14,37 @@ from .storage.types import Arg, Step, Trajectory
 P = ParamSpec("P")
 R = TypeVar("R")
 
+
 class Engine:
     def __init__(self):
-        self.db: DB = DB() # todo
+        self.db: DB = DB()  # todo
 
         self.finalized = False
 
         # dispatch layer
         self.registry: ToolRegistry = ToolRegistry()
-        self.method_instance: Optional[Any] = None # todo: consider renaming
+        self.method_instance: Optional[Any] = None  # todo: consider renaming
         self.agent: Optional[Callable] = None
 
         # runtime state
         self.recording = False
         self.current_params: Optional[Dict[str, Any]] = None
         self.current_trajectory: Optional[Trajectory] = None
-        
+
         # performance tracking
         self.metrics = Metrics()
 
     #
     # Builder Methods
     #
-        
+
     def set_agent(self, agent: Callable) -> "Engine":
         "Set the agent to be used when the engine cannot find a trajectory for a task"
         if self.finalized:
             raise ValueError("Engine is finalized and cannot be modified")
         self.agent = agent
         return self
-    
+
     def set_context(self, method_instance: Any) -> "Engine":
         "For use in engine mode, provide an instance of the dependency used as 'self' for your method-based tools"
         if self.finalized:
@@ -63,8 +64,7 @@ class Engine:
             )
         self.finalized = True
         return self
-        
-    
+
     #
     # Decorators
     #
@@ -83,26 +83,26 @@ class Engine:
         if self.finalized:
             raise ValueError("Engine is finalized and cannot register new functions")
         return self._register_tool(pre_check=pre_check, post_check=post_check, is_method=False)
-    
+
     def method(self, pre_check: Optional[Check] = None, post_check: Optional[Check] = None):
         """
-            Method decorator that applies checks before and/or after a function execution.
+        Method decorator that applies checks before and/or after a function execution.
 
-            Args:
-                pre_check: Check to run before function execution
-                post_check: Check to run after function execution
+        Args:
+            pre_check: Check to run before function execution
+            post_check: Check to run after function execution
 
-            Returns:
-                Decorated function with the same signature as the original
+        Returns:
+            Decorated function with the same signature as the original
         """
         if self.finalized:
             raise ValueError("Engine is finalized and cannot register new methods")
         return self._register_tool(pre_check=pre_check, post_check=post_check, is_method=True)
-        
+
     def _register_tool(self, pre_check: Optional[Check] = None, post_check: Optional[Check] = None, is_method: bool = False):
         def decorator(func: Callable[P, R]) -> Callable[P, R]:
             tool = self.registry.register(func, is_method=is_method, pre_check=pre_check, post_check=post_check)
-            
+
             @functools.wraps(func)
             def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
                 if not self.recording:
@@ -113,7 +113,7 @@ class Engine:
                 if pre_check:
                     pre_check_snapshot = pre_check.capture(*args, **kwargs)
 
-                # Execute function, unmodified 
+                # Execute function, unmodified
                 result = func(*args, **kwargs)
 
                 # Capture env features after call
@@ -128,10 +128,11 @@ class Engine:
                     kwargs,
                     pre_check_snapshot,
                     post_check_snapshot,
-
                 )
                 return result
+
             return wrapper
+
         return decorator
 
     def __call__(self, task: str, params: Optional[Dict[str, Any]] = None) -> bool:
@@ -162,12 +163,12 @@ class Engine:
                     with self.metrics.measure("runtime", "precheck", "compare"):
                         if not tool.do_pre_check_compare(pre_check_snapshot, next_step.pre_check_snapshot):
                             raise ValueError("Pre-check failed at runtime, despite working at query time.")
-                
+
                 # Execute step
                 print(Fore.GREEN, end="")
                 _ = tool.do_func(ctx, next_step)
                 print(Style.RESET_ALL, end="")
-                
+
                 post_check_snapshot = None
                 if tool.post_check:
                     with self.metrics.measure("runtime", "postcheck", "capture"):
@@ -186,14 +187,15 @@ class Engine:
                         args=next_step.args,
                         kwargs=next_step.kwargs,
                         # novel for this pass
-                        pre_check_snapshot=pre_check_snapshot, 
+                        pre_check_snapshot=pre_check_snapshot,
                         post_check_snapshot=post_check_snapshot,
-                ))
+                    )
+                )
 
     def _filter_partials(self, trajectories: List[Trajectory]) -> List[Trajectory]:
         if not self.current_trajectory or len(self.current_trajectory.steps) == 0:
             return trajectories
-        
+
         selected = []
         for candidate in trajectories:
             matched_steps = 0
@@ -235,7 +237,7 @@ class Engine:
                 # no pre-check, so it's safe to execute
                 selected.append(candidate)
                 continue
-                
+
             tool = self.registry.get_tool(next_step)
 
             # memoize redundant captures (assumed safe as filter_pre_checks is run at a single point in time)
@@ -255,22 +257,18 @@ class Engine:
                 selected.append(candidate)
 
         return selected
-        
 
     def _step_generator(self, ctx: RuntimeContext, task: str) -> Tuple[Optional[Step], bool]:
         "Generator that returns the next step to execute, and a completed flag if a full trajectory has been executed"
-        
-        pagesize = 20 # todo: make configurable?
+
+        pagesize = 20  # todo: make configurable?
         page = 0
-        
+
         available_hashes = self.registry.get_available_hashes()
-        
+
         # Fetch trajectories from db in pages, top up as needed
         with self.metrics.measure("query"):
-            trajectories = self.db.fetch_trajectories(
-                task=task, 
-                page=page,
-                pagesize=pagesize)
+            trajectories = self.db.fetch_trajectories(task=task, page=page, pagesize=pagesize)
 
         step_memo = {}
         step_idx = 0
@@ -304,8 +302,7 @@ class Engine:
 
             yield trajectories[0].steps[step_idx], False
             step_idx += 1
-            step_memo = {} # reset memo on step change
-                
+            step_memo = {}  # reset memo on step change
 
     def _invoke_agent(self, task: str):
         print(Fore.MAGENTA, end="")
@@ -324,9 +321,8 @@ class Engine:
             self.recording = prev_recording
             self.db.add_trajectory(self.current_trajectory)
             self.current_trajectory = None
-    
+
     def _store_step(self, tool: Tool, args: P.args, kwargs: P.kwargs, pre_check_snapshot: Optional[Any], post_check_snapshot: Optional[Any]):
-        
         # Strip self arg if tool is a method
         args = args[1:] if tool.is_method else args
 
@@ -334,7 +330,7 @@ class Engine:
         step_args = []
         for val in args:
             # assume static by default
-            arg = Arg(is_param=False, static_value=val) 
+            arg = Arg(is_param=False, static_value=val)
             if self.current_params:
                 for k, v in self.current_params.items():
                     if val == v:
@@ -345,7 +341,7 @@ class Engine:
         step_kwargs = {}
         for key, val in kwargs.items():
             # assume static by default
-            arg = Arg(is_param=False, static_value=val) 
+            arg = Arg(is_param=False, static_value=val)
             if self.current_params:
                 for k, v in self.current_params.items():
                     if val == v:
@@ -364,19 +360,19 @@ class Engine:
                 post_check_snapshot=post_check_snapshot,
             )
         )
-    
+
     def enable_metrics(self):
         """Enable performance metrics collection"""
         self.metrics.enable()
-        
+
     def disable_metrics(self):
         """Disable performance metrics collection"""
         self.metrics.disable()
-        
+
     def report_metrics(self):
         """Print a report of collected metrics"""
         self.metrics.report()
-        
+
     def reset_metrics(self):
         """Reset all metrics to zero"""
         self.metrics.reset()

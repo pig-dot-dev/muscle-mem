@@ -1,20 +1,15 @@
-from typing import Any, Callable, Dict, List, Optional, Tuple, Set
+from typing import Callable, Dict, Optional, Set, Tuple
 
 from ..check import Check
 from ..storage.types.step import Step
-from .context import RuntimeContext
 from .tool import Tool
+
 
 class ToolRegistry:
     def __init__(self):
         self._tools: Dict[Tuple[str, int], Tool] = {}
-    
-    def register(self,
-                func: Callable,
-                is_method: bool = False,
-                pre_check: Optional[Check] = None, 
-                post_check: Optional[Check] = None
-        ) -> None:
+
+    def register(self, func: Callable, is_method: bool = False, pre_check: Optional[Check] = None, post_check: Optional[Check] = None) -> None:
         """Register a function with its hash"""
         tool = Tool(func, is_method, pre_check, post_check)
         if (tool.func_name, tool.func_hash) in self._tools:

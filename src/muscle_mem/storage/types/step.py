@@ -14,7 +14,7 @@ class Step:
     signature_hash: int = None  # Hash of function signature for memoization
     pre_check_snapshot: Optional[Any] = None
     post_check_snapshot: Optional[Any] = None
-    
+
     def __post_init__(self):
         # Compute signature hash if not provided
         if self.signature_hash is None:
