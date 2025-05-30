@@ -16,7 +16,7 @@ class TestEngineCaching:
             def __init__(self):
                 self.val = 0
 
-            def capture(self) -> int:
+            def capture(self, n: int) -> int:
                 return self.val
 
             @staticmethod
@@ -24,8 +24,8 @@ class TestEngineCaching:
                 return current == candidate
 
             @engine.method(pre_check=mm.Check(capture=capture, compare=compare))
-            def increment(self):
-                self.val += 1
+            def increment(self, n: int = 1):
+                self.val += n
                 return self.val
 
         env = Env()
@@ -40,7 +40,8 @@ class TestEngineCaching:
                 n = int(task.split(" ")[1])
                 for _ in range(n):
                     # simulates multi-step tool calling
-                    self.env.increment()
+                    arg_from_agent = 1  # simulate some parameter decided by the agent, used for testing parameterization
+                    self.env.increment(arg_from_agent)
 
         agent = Agent(env)
 
@@ -118,11 +119,14 @@ class TestEngineCaching:
         assert engine("add 2")
         assert env.val == 2
 
-        # note: this test currently fails
-        # 0->2 is cached, but steps include captured envs (0, 1, 2)
-        # when it's retrieved as a candidate, the current capture() yields 0
-        # so compare passes on 0th step, but fails on 1st and 2nd
+    def test_parameterization(self, setup):
+        env, _, engine = setup
 
-        # for actions that influence subsequent captures,
-        # it's only valid to query against the first step of a trajectory
-        # and only precheck every step at runtime
+        env.val = 0
+        assert not engine("add 1", params={"n": 1})
+        assert env.val == 1
+
+        env.val = 0
+        # note: the use of task name as the task ID will be deprecated in the future in favor of tags, so don't worry that we're using "add 1" despite n=2
+        assert engine("add 1", params={"n": 2})
+        assert env.val == 2  # cache hit, but dynamic param was used
