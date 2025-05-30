@@ -1,14 +1,15 @@
-from .dispatch import Tool, ToolRegistry
-from typing import Optional, Any, Callable
-from .check import Check
-# from .metrics import Metrics
-from .storage.types import Arg, Step, Trajectory
-from .dispatch.context import RuntimeContext
-from .storage import DB
-from typing import ParamSpec, TypeVar, Dict, List, Tuple
 import functools
-from colorama import Fore, Style
 from contextlib import contextmanager
+from typing import Any, Callable, Dict, List, Optional, ParamSpec, Tuple, TypeVar, Set 
+
+from colorama import Fore, Style
+
+from .check import Check
+from .dispatch import Tool, ToolRegistry
+from .dispatch.context import RuntimeContext
+from .metrics import Metrics
+from .storage import DB
+from .storage.types import Arg, Step, Trajectory
 
 P = ParamSpec("P")
 R = TypeVar("R")
@@ -27,7 +28,10 @@ class Engine:
         # runtime state
         self.recording = False
         self.current_params: Optional[Dict[str, Any]] = None
-        self.current_trajectory: Optional[Trajectory] = None        
+        self.current_trajectory: Optional[Trajectory] = None
+        
+        # performance tracking
+        self.metrics = Metrics()
 
     #
     # Builder Methods
@@ -153,9 +157,11 @@ class Engine:
 
                 pre_check_snapshot = None
                 if tool.pre_check:
-                    pre_check_snapshot = tool.do_pre_check_capture(ctx, next_step)
-                    if not tool.do_pre_check_compare(pre_check_snapshot, next_step.pre_check_snapshot):
-                        raise ValueError("Pre-check failed at runtime, despite working at query time.")
+                    with self.metrics.measure("runtime", "precheck", "capture"):
+                        pre_check_snapshot = tool.do_pre_check_capture(ctx, next_step)
+                    with self.metrics.measure("runtime", "precheck", "compare"):
+                        if not tool.do_pre_check_compare(pre_check_snapshot, next_step.pre_check_snapshot):
+                            raise ValueError("Pre-check failed at runtime, despite working at query time.")
                 
                 # Execute step
                 print(Fore.GREEN, end="")
@@ -164,9 +170,11 @@ class Engine:
                 
                 post_check_snapshot = None
                 if tool.post_check:
-                    post_check_snapshot = tool.do_post_check_capture(ctx, next_step)
-                    if not tool.do_post_check_compare(post_check_snapshot, next_step.post_check_snapshot):
-                        raise ValueError("Post-check failed at runtime")
+                    with self.metrics.measure("runtime", "postcheck", "capture"):
+                        post_check_snapshot = tool.do_post_check_capture(ctx, next_step)
+                    with self.metrics.measure("runtime", "postcheck", "compare"):
+                        if not tool.do_post_check_compare(post_check_snapshot, next_step.post_check_snapshot):
+                            raise ValueError("Post-check failed at runtime")
 
                 # Add to current trajectory
                 self.current_trajectory.steps.append(
@@ -207,10 +215,17 @@ class Engine:
                 selected.append(candidate)
         return selected
 
+    def _filter_func_hashes(self, trajectories: List[Trajectory], available_hashes: Set[int], idx: int) -> List[Trajectory]:
+        selected = []
+        for candidate in trajectories:
+            if idx >= len(candidate.steps):
+                continue
+            next_step = candidate.steps[idx]
+            if next_step.func_hash in available_hashes:
+                selected.append(candidate)
+        return selected
+
     def _filter_pre_checks(self, ctx: RuntimeContext, memo: Dict, trajectories: List[Trajectory], idx: int) -> List[Trajectory]:
-        if idx >= len(trajectories[0].steps):
-            return trajectories
-        
         selected = []
         for candidate in trajectories:
             if idx >= len(candidate.steps):
@@ -219,7 +234,8 @@ class Engine:
             if next_step.pre_check_snapshot is None:
                 # no pre-check, so it's safe to execute
                 selected.append(candidate)
-            
+                continue
+                
             tool = self.registry.get_tool(next_step)
 
             # memoize redundant captures (assumed safe as filter_pre_checks is run at a single point in time)
@@ -228,10 +244,12 @@ class Engine:
                 current = memo[key]
             else:
                 # first time we've seen this configuration, run capture
-                current = tool.do_pre_check_capture(ctx, next_step)
+                with self.metrics.measure("filter", "capture"):
+                    current = tool.do_pre_check_capture(ctx, next_step)
                 memo[key] = current
 
-            passed = tool.do_pre_check_compare(current, next_step.pre_check_snapshot)
+            with self.metrics.measure("filter", "compare"):
+                passed = tool.do_pre_check_compare(current, next_step.pre_check_snapshot)
 
             if passed:
                 selected.append(candidate)
@@ -248,11 +266,11 @@ class Engine:
         available_hashes = self.registry.get_available_hashes()
         
         # Fetch trajectories from db in pages, top up as needed
-        trajectories = self.db.fetch_trajectories(
-            task=task, 
-            available_hashes=available_hashes, 
-            page=page,
-            pagesize=pagesize)
+        with self.metrics.measure("query"):
+            trajectories = self.db.fetch_trajectories(
+                task=task, 
+                page=page,
+                pagesize=pagesize)
 
         step_memo = {}
         step_idx = 0
@@ -260,7 +278,8 @@ class Engine:
             # Attempt to top up trajectories if we've run out
             if not trajectories:
                 page += 1
-                trajectories = self.db.fetch_trajectories(task, available_hashes=available_hashes, page=page, pagesize=pagesize)
+                with self.metrics.measure("query"):
+                    trajectories = self.db.fetch_trajectories(task, page=page, pagesize=pagesize)
 
                 if not trajectories:
                     # We've reached the end of dataset, signal cache-miss
@@ -274,7 +293,9 @@ class Engine:
                 return
 
             # Apply filtering
-            trajectories = self._filter_partials(trajectories)
+            with self.metrics.measure("filter", "partials"):
+                trajectories = self._filter_partials(trajectories)
+            trajectories = self._filter_func_hashes(trajectories, available_hashes, step_idx)
             trajectories = self._filter_pre_checks(ctx, step_memo, trajectories, step_idx)
 
             if not trajectories:
@@ -344,3 +365,18 @@ class Engine:
             )
         )
     
+    def enable_metrics(self):
+        """Enable performance metrics collection"""
+        self.metrics.enable()
+        
+    def disable_metrics(self):
+        """Disable performance metrics collection"""
+        self.metrics.disable()
+        
+    def report_metrics(self):
+        """Print a report of collected metrics"""
+        self.metrics.report()
+        
+    def reset_metrics(self):
+        """Reset all metrics to zero"""
+        self.metrics.reset()

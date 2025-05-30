@@ -1,4 +1,4 @@
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple, Set
 
 from ..check import Check
 from ..storage.types.step import Step
@@ -35,6 +35,6 @@ class ToolRegistry:
         tool.assert_match(step)
         return tool
 
-    def get_available_hashes(self) -> List[int]:
+    def get_available_hashes(self) -> Set[int]:
         """Return list of function hashes available for DB filtering"""
-        return [hash_val for (_, hash_val) in self._tools.keys()]
+        return set([hash_val for (_, hash_val) in self._tools.keys()])
