@@ -360,19 +360,3 @@ class Engine:
                 post_check_snapshot=post_check_snapshot,
             )
         )
-
-    def enable_metrics(self):
-        """Enable performance metrics collection"""
-        self.metrics.enable()
-
-    def disable_metrics(self):
-        """Disable performance metrics collection"""
-        self.metrics.disable()
-
-    def report_metrics(self):
-        """Print a report of collected metrics"""
-        self.metrics.report()
-
-    def reset_metrics(self):
-        """Reset all metrics to zero"""
-        self.metrics.reset()
