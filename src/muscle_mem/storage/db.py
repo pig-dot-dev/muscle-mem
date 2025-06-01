@@ -17,4 +17,8 @@ class DB:
     def fetch_trajectories(self, task: str, page: int = 0, pagesize: int = 20) -> List[Trajectory]:
         if task not in self.trajectories:
             return []
-        return self.trajectories[task][page * pagesize : (page + 1) * pagesize]
+
+        candidates = self.trajectories[task]
+
+        # return paged results. Note, may be race condition if trajectories are added while paging.
+        return candidates[page * pagesize : (page + 1) * pagesize]
