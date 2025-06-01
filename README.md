@@ -169,6 +169,32 @@ def hello(name: str):
     print(f"hello {name}")
 ```
 
+### Top Level Parameters
+
+Muscle Mem, by default, stores all arguments to a tool call as static values.
+
+In many cases, you'd want select arguments to be dynamic per-run, and not stored in the trajectory. 
+
+For example, a form filling bot filling a `First Name` text field would invoke a `type("John")` tool call, but we'd want a way to use a different name on future runs.
+
+If a value is known at runtime before calling your agent (likely already being templated into your prompt), it can be marked as a top level parameter with the optional `params` argument to `engine()`. 
+
+```python
+@engine.function()
+def type(text: str):
+    print(text)
+
+# first run stores invocation of type("John"), with dynamic arg `text` mapped to top level param `name`
+engine("fill the form with name: John", params={"name": "John"})
+
+# second run is a cache hit, using Jane instead of John
+engine("fill the form with name: Jane", params={"name": "Jane"})
+```
+
+While recording a trajectory, if any underlying tool calls use an argument that directly matches a top level parameter, the engine will mark it as dynamic in the trajectory with a mapping to the top level parameter key.
+
+The current implementation uses exact string matching on tool args to identify it as originating from a top level parameter. It is assumed that all tool args came from an LLM, therefore are string serializeable.
+
 ### Putting it all together
 
 Below is the combined script for all of the above code snippets. 
