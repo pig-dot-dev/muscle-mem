@@ -135,7 +135,12 @@ class Engine:
 
         return decorator
 
-    def __call__(self, task: str, params: Optional[Dict[str, Any]] = None) -> bool:
+    def __call__(self,
+            *args, # user args for passthrough
+            tags: List[str] = [],
+            params: Optional[Dict[str, Any]] = None, 
+            **kwargs # user kwargs for passthrough
+        ) -> bool:
         if not self.finalized:
             self.finalize()
 
@@ -144,14 +149,14 @@ class Engine:
             method_instance=self.method_instance,
             params=params,
         )
-        with self._record(task, params):
-            for next_step, completed in self._step_generator(ctx, task):
+        with self._record(tags, params):
+            for next_step, completed in self._step_generator(ctx, tags):
                 if completed:
                     # Full cache hit
                     return True
                 if not next_step:
                     # Cache miss case
-                    self._invoke_agent(task)
+                    self._invoke_agent(*args, **kwargs)
                     return False
 
                 tool = self.registry.get_tool(next_step)
@@ -258,7 +263,7 @@ class Engine:
 
         return selected
 
-    def _step_generator(self, ctx: RuntimeContext, task: str) -> Tuple[Optional[Step], bool]:
+    def _step_generator(self, ctx: RuntimeContext, tags: List[str]) -> Tuple[Optional[Step], bool]:
         "Generator that returns the next step to execute, and a completed flag if a full trajectory has been executed"
 
         pagesize = 20  # todo: make configurable?
@@ -268,7 +273,7 @@ class Engine:
 
         # Fetch trajectories from db in pages, top up as needed
         with self.metrics.measure("query"):
-            trajectories = self.db.fetch_trajectories(task=task, page=page, pagesize=pagesize)
+            trajectories = self.db.fetch_trajectories(tags=tags, page=page, pagesize=pagesize)
 
         step_memo = {}
         step_idx = 0
@@ -277,7 +282,7 @@ class Engine:
             if not trajectories:
                 page += 1
                 with self.metrics.measure("query"):
-                    trajectories = self.db.fetch_trajectories(task, page=page, pagesize=pagesize)
+                    trajectories = self.db.fetch_trajectories(tags=tags, page=page, pagesize=pagesize)
 
                 if not trajectories:
                     # We've reached the end of dataset, signal cache-miss
@@ -304,16 +309,16 @@ class Engine:
             step_idx += 1
             step_memo = {}  # reset memo on step change
 
-    def _invoke_agent(self, task: str):
+    def _invoke_agent(self, *args, **kwargs):
         print(Fore.MAGENTA, end="")
-        self.agent(task)
+        self.agent(*args, **kwargs)
         print(Style.RESET_ALL, end="")
 
     @contextmanager
-    def _record(self, task: str, params: Optional[Dict[str, Any]] = None):
+    def _record(self, tags: List[str], params: Optional[Dict[str, Any]] = None):
         prev_recording = self.recording
         self.recording = True
-        self.current_trajectory = Trajectory(task=task, steps=[])
+        self.current_trajectory = Trajectory(tags=tags, steps=[])
         self.current_params = params
         try:
             yield
