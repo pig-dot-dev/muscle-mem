@@ -66,6 +66,16 @@ engine("do some task")
 engine("do some task") # cache hit
 ```
 
+By default, trajectories are stored in a single cache. You may tag trajectories with a description of the task to create unique buckets.
+
+```python
+engine("do some task", tags=["some task"]) # cache miss
+engine("do some task", tags=["some task"]) # cache hit
+
+engine("do some task", tags=["different task"]) # cache miss
+engine("do some task", tags=["different task"]) # cache hit
+```
+
 ## Tool Instrumentation
 
 Decorators are used to instrument action-taking tools, so that the engine can record actions as your agent takes them.
@@ -173,11 +183,11 @@ def hello(name: str):
 
 Muscle Mem, by default, stores all arguments to a tool call as static values.
 
-In many cases, you'd want select arguments to be dynamic per-run, and not stored in the trajectory. 
+This may not always be desired, as some arguments may need to be dynamic per-run. For example, a form filling bot filling a `First Name` text field would invoke a `type("John")` tool call, but on future runs we'd want a way to use a different name.
 
-For example, a form filling bot filling a `First Name` text field would invoke a `type("John")` tool call, but we'd want a way to use a different name on future runs.
+Muscle Mem addresses this with a top level `params` system, which allows you to specify arguments that should be dynamic per-run.
 
-If a value is known at runtime before calling your agent (likely already being templated into your prompt), it can be marked as a top level parameter with the optional `params` argument to `engine()`. 
+If a value is known at runtime before calling your agent (you're likely already templating it into your prompt), it can be marked as a top level parameter with the optional `params` argument to `engine()`.
 
 ```python
 @engine.function()
@@ -191,7 +201,7 @@ engine("fill the form with name: John", params={"name": "John"})
 engine("fill the form with name: Jane", params={"name": "Jane"})
 ```
 
-While recording a trajectory, if any underlying tool calls use an argument that directly matches a top level parameter, the engine will mark it as dynamic in the trajectory with a mapping to the top level parameter key.
+While recording a trajectory, if any underlying tool calls sees an argument that directly matches a top level parameter, the engine will mark it as dynamic and map it to the top level parameter by key.
 
 The current implementation uses exact string matching on tool args to identify it as originating from a top level parameter. It is assumed that all tool args came from an LLM, therefore are string serializeable.
 
