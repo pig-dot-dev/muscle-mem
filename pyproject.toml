@@ -25,6 +25,7 @@ packages = ["src/muscle_mem"]
 dev = [
     "ruff>=0.3.0",
     "twine",
+    "pytest",
     "build",
 
     # for CUA test

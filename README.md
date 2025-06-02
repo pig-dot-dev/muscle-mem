@@ -13,6 +13,7 @@ It's unexplored territory, so all feedback is welcome!
 ### Dev Log
 - May 7, 2025 - [First working demo](https://www.loom.com/share/5936cd9779504aa5a7dce5d72370c35d)
 - May 8, 2025 - Open sourced
+- June 1, 2025 - Parameterization and Tags merged
 <br>
 <br>
 
@@ -46,6 +47,8 @@ If you can answer this, your agent can have Muscle Memory.
 
 `pip install muscle-mem`
 
+Muscle Mem's API is v0 and will break on minor releases, so we strongly recommend pinning to a specific version for production use.
+
 ## Engine
 
 The engine wraps your agent and serves as the primary executor of tasks.
@@ -65,6 +68,9 @@ your_agent("do some task")
 engine("do some task")
 engine("do some task") # cache hit
 ```
+
+It is expected that your agent is callable, either as a function or with a `__call__` method. Any args and kwargs passed to `engine()` will be directly passed to your agent. Our examples use a string, but it could be a list of ChatCompletion messages or whatever your agent callable expects.
+
 
 By default, trajectories are stored in a single cache. You may tag trajectories with a description of the task to create unique buckets.
 

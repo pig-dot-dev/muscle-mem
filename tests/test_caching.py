@@ -143,10 +143,9 @@ class TestEngineCaching:
         env, _, engine = setup
 
         env.val = 0
-        assert not engine("add 1", params={"n": 1})
+        assert not engine("add 1", params={"n": 1}, tags=["add"])
         assert env.val == 1
 
         env.val = 0
-        # note: the use of task name as the task ID will be deprecated in the future in favor of tags, so don't worry that we're using "add 1" despite n=2
-        assert engine("add 1", params={"n": 2})
+        assert engine("add 2", params={"n": 2}, tags=["add"])
         assert env.val == 2  # cache hit, but dynamic param was used
