@@ -119,6 +119,26 @@ class TestEngineCaching:
         assert engine("add 2")
         assert env.val == 2
 
+    def test_tags(self, setup):
+        env, _, engine = setup
+
+        env.val = 0
+        assert not engine("add 1", tags=["tag1"])
+        assert env.val == 1
+
+        env.val = 0
+        assert engine("add 1", tags=["tag1"])
+        assert env.val == 1
+
+        # different tag should miss
+        env.val = 0
+        assert not engine("add 1", tags=["tag2"])
+        assert env.val == 1
+
+        env.val = 0
+        assert engine("add 1", tags=["tag2"])
+        assert env.val == 1
+
     def test_parameterization(self, setup):
         env, _, engine = setup
 
