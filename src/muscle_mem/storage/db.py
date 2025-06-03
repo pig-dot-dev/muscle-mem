@@ -7,7 +7,7 @@ from .types import Trajectory
 # Suggestions welcome for database implementations
 class DB:
     def __init__(self):
-        self.trajectories: Dict[Tuple[str, ...], List[Trajectory]] = {} # tags -> trajectories
+        self.trajectories: Dict[Tuple[str, ...], List[Trajectory]] = {}  # tags -> trajectories
 
     def add_trajectory(self, trajectory: Trajectory):
         key = tuple(trajectory.tags)

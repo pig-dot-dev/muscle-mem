@@ -1,6 +1,6 @@
 import functools
 from contextlib import contextmanager
-from typing import Any, Callable, Dict, List, Optional, ParamSpec, Set, Tuple, TypeVar
+from typing import Any, Callable, Dict, Generic, List, Optional, ParamSpec, Set, Tuple, TypeVar
 
 from colorama import Fore, Style
 
@@ -15,7 +15,7 @@ P = ParamSpec("P")
 R = TypeVar("R")
 
 
-class Engine:
+class Engine(Generic[P, R]):
     def __init__(self):
         self.db: DB = DB()  # todo
 
@@ -38,21 +38,21 @@ class Engine:
     # Builder Methods
     #
 
-    def set_agent(self, agent: Callable) -> "Engine":
+    def set_agent(self, agent: Callable[P, R]) -> "Engine[P, R]":
         "Set the agent to be used when the engine cannot find a trajectory for a task"
         if self.finalized:
             raise ValueError("Engine is finalized and cannot be modified")
         self.agent = agent
         return self
 
-    def set_context(self, method_instance: Any) -> "Engine":
+    def set_context(self, method_instance: Any) -> "Engine[P, R]":
         "For use in engine mode, provide an instance of the dependency used as 'self' for your method-based tools"
         if self.finalized:
             raise ValueError("Engine is finalized and cannot be modified")
         self.method_instance = method_instance
         return self
 
-    def finalize(self) -> "Engine":
+    def finalize(self) -> "Engine[P, R]":
         "Ensure engine is ready for use and prevent further modification"
         if self.registry.len() == 0:
             raise ValueError("Engine must have at least one tool. Use engine.function() or engine.method() to register tools")
@@ -135,12 +135,23 @@ class Engine:
 
         return decorator
 
-    def __call__(self,
-            *args, # user args for passthrough
-            tags: List[str] = [],
-            params: Optional[Dict[str, Any]] = None, 
-            **kwargs # user kwargs for passthrough
-        ) -> bool:
+    def __call__(
+        self,
+        *args: P.args,  # Positional arguments passed to the agent callable
+        tags: Optional[List[str]] = None,
+        params: Optional[Dict[str, Any]] = None,
+        **kwargs: P.kwargs,  # Keyword arguments passed to the agent callable
+    ) -> bool:
+        """
+        Call the engine to perform a task, as you would your agent.
+
+        All args are passed unmodified to the agent callable, except for reserved args.
+        
+        Reserved keyword args:
+            tags: Optional[List[str]] - tags to filter trajectories by
+            params: Optional[Dict[str, Any]] - top level parameters for parameterized trajectories
+        """
+
         if not self.finalized:
             self.finalize()
 
@@ -149,6 +160,7 @@ class Engine:
             method_instance=self.method_instance,
             params=params,
         )
+        tags = tags or []
         with self._record(tags, params):
             for next_step, completed in self._step_generator(ctx, tags):
                 if completed:
@@ -309,7 +321,7 @@ class Engine:
             step_idx += 1
             step_memo = {}  # reset memo on step change
 
-    def _invoke_agent(self, *args, **kwargs):
+    def _invoke_agent(self, *args: P.args, **kwargs: P.kwargs) -> R:
         print(Fore.MAGENTA, end="")
         self.agent(*args, **kwargs)
         print(Style.RESET_ALL, end="")
