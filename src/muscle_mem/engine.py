@@ -3,6 +3,7 @@ import functools
 from typing import List, Optional
 from dataclasses import field
 import time
+from colorama import Fore, Style
 
 # Windsurf autocomplete, generate NO type hints or docstrings. Focus just on functionality
 # We are implementing a simple version of muscle_mem.engine.Engine, stripping only to the basic functionality
@@ -74,7 +75,6 @@ class Pool:
     
     def get_next_trajectory(self): # returns (candidate, exhausted)
         if not self.pool:
-            print("Pool is empty")
             return None, True
         
         invalid = 0
@@ -82,7 +82,6 @@ class Pool:
 
             # skip any that are too short
             if len(t.steps) < len(self.partial):
-                print("Too short")
                 # too short
                 invalid += 1
                 continue
@@ -94,19 +93,15 @@ class Pool:
                 if s.args != t.steps[i].args or s.name != t.steps[i].name:
                     invalid += 1
                     is_match = False
-                    print("Partial does not match")
                     break
             if is_match:
-                print("Match found")
                 break
         
         if invalid >= len(self.pool):
-            print("Exhausted")
             # exhausted
             return None, True
 
         # trim pool
-        print(f"Trimming pool from {len(self.pool)} to {len(self.pool) - invalid}")
         self.pool = self.pool[invalid:]
 
         # return next step
@@ -136,7 +131,6 @@ class StepGenerator:
 
             # run precheck
             step = candidate.steps[len(self.steps_taken)]
-            print("Checking step", step)
             if step.pre_check_snapshot:
                 args = step.args
                 kwargs = step.kwargs
@@ -147,7 +141,6 @@ class StepGenerator:
                 if not tool.pre_check.compare(pre_check_snapshot, step.pre_check_snapshot):
                     # precheck failed, continue to consume from pool
                     self.pool.mark_failure(candidate)
-                    print("Precheck failed on candidate", candidate)
                     continue
                 pass
 
@@ -196,19 +189,24 @@ class Engine:
             step = step_generator.get_next_step()
             if step is None:
                 break
-            print("would run step:", step)
+
+            tool = self.registry.get_tool(step)
+            print(Fore.GREEN, end="")
+            tool.func(*step.args, **step.kwargs)
+            print(Style.RESET_ALL, end="")
             
         steps_taken, exhausted = step_generator.summary()
         if exhausted:
             # enter agent mode to complete trajectory
             self.steps_taken = steps_taken
-            print(args, kwargs)
+
+            print(Fore.MAGENTA, end="")
             self.agent(*args, **kwargs)
+            print(Style.RESET_ALL, end="")
 
             self.db.add_trajectory(self.steps_taken)
             return False
 
-        print("trajectory completed", self.steps_taken)
         return True
         
 
@@ -276,11 +274,11 @@ if __name__ == "__main__":
     cache_hit = engine("john")
     assert cache_hit
 
+    assert len(engine.db.get_trajectories()) == 1
+
     # Break cache
     time.sleep(1)
     cache_hit = engine("john")
     assert not cache_hit
 
-
-    print("\n\n\n\n")
-    print(len(engine.db.get_trajectories()))
+    assert len(engine.db.get_trajectories()) == 2
