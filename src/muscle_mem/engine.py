@@ -63,8 +63,10 @@ class Pool:
     def __init__(self, db):
         self.db = db
         self.pool = db.get_trajectories()
-        self.partial = []
+        self.steps_taken = []
+        self.sort()
 
+    def sort(self):
         def sort_key(t: Trajectory):
             total_runs = t.successful_runs + t.failed_runs
             if total_runs == 0:
@@ -75,7 +77,6 @@ class Pool:
             
             # bias to most recent runs
             return score * decay
-            
         self.pool.sort(key=sort_key, reverse=True)
 
     def mark_success(self, trajectory):
@@ -96,15 +97,14 @@ class Pool:
         for t in self.pool:
 
             # skip any that are too short
-            if len(t.steps) < len(self.partial):
+            if len(t.steps) < len(self.steps_taken):
                 # too short
                 invalid += 1
                 continue
             
-
             # skip any with partials that don't match
             is_match = True
-            for i, s in enumerate(self.partial):
+            for i, s in enumerate(self.steps_taken):
                 if s.args != t.steps[i].args or s.name != t.steps[i].name:
                     invalid += 1
                     is_match = False
@@ -122,12 +122,27 @@ class Pool:
         # return next step
         return self.pool[0], False
         
-        
+class ArgsContext:
+    def __init__(self, dep_instance, params):
+        self.dep_instance = dep_instance
+        self.params = params
+    
+    def strip(self, args, kwargs):
+        """strip self and params from args and kwargs"""
+        # todo
+        return args, kwargs
+
+    def inject(self, args, kwargs):
+        """inject self and params into args and kwargs"""
+        # todo
+        return args, kwargs
+
 
 class StepGenerator:
-    def __init__(self, db, registry):
+    def __init__(self, db, registry, args_context):
         self.db = db
         self.registry = registry
+        self.args_context = args_context
         self.pool = Pool(db)
         self.steps_taken = [] # steps already executed
         self.exhausted = False
@@ -150,6 +165,7 @@ class StepGenerator:
             if step.pre_check_snapshot:
                 args = step.args
                 kwargs = step.kwargs
+                args, kwargs = self.args_context.inject(args, kwargs)
 
                 # get impl
                 tool = self.registry.get_tool(step)
@@ -175,6 +191,7 @@ class Engine:
         self.agent = None
         self.finalized = False
         self.registry = Registry()
+        self.args_context = ArgsContext(None, None)
         self.db = DB()
         self.steps_taken = []
     
@@ -190,6 +207,7 @@ class Engine:
         return self._register_tool(pre_check=pre_check)
 
     def _store_step(self, tool, args, kwargs, pre_check_snapshot):
+        args, kwargs = self.args_context.strip(args, kwargs)
         self.steps_taken.append(
             Step(
                 func_name=tool.func_name,
@@ -202,8 +220,10 @@ class Engine:
     def __call__(self, *args, **kwargs):
         if not self.finalized:
             self.finalize()
+
+        self.args_context = ArgsContext(None, None) # todo: actually build this. also saving it to instance state is sketch but assume single thread
         
-        step_generator = StepGenerator(self.db, self.registry)
+        step_generator = StepGenerator(self.db, self.registry, self.args_context) # todo: pass in args_context
         while True:
             step = step_generator.get_next_step()
             if step is None:
