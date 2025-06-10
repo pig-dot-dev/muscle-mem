@@ -142,6 +142,9 @@ class StepGenerator:
                     # precheck failed, continue to consume from pool
                     self.pool.mark_failure(candidate)
                     continue
+
+                # overwrite step's pre_check_snapshot with fresh data
+                step.pre_check_snapshot = pre_check_snapshot
                 pass
 
             self.steps_taken.append(step) # todo: we assume the following executed step succeeds
