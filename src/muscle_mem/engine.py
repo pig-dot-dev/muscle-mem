@@ -17,16 +17,19 @@ class Step:
 
 @dataclass
 class Trajectory:
+    steps: List[Step] = field(default_factory=list)
+
+    # metadata for sorting
     successful_runs: int = 0
     failed_runs: int = 0
-    steps: List[Step] = field(default_factory=list)
+    last_successful_run: float = 0
 
 class DB:
     def __init__(self):
         self.trajectories = []
     
     def add_trajectory(self, steps):
-        trajectory = Trajectory(steps=steps, successful_runs=1, failed_runs=0)
+        trajectory = Trajectory(steps=steps, successful_runs=1, failed_runs=0, last_successful_run=time.time())
         self.trajectories.append(trajectory)
 
     def get_trajectories(self):
@@ -66,12 +69,24 @@ class Pool:
             total_runs = t.successful_runs + t.failed_runs
             if total_runs == 0:
                 return 0  # No runs yet, default to lowest priority
-            return t.successful_runs / total_runs
+
+            score = t.successful_runs / total_runs
+            decay = time.time() / t.last_successful_run
+            
+            # bias to most recent runs
+            return score * decay
+            
         self.pool.sort(key=sort_key, reverse=True)
 
+    def mark_success(self, trajectory):
+        # temp, while we don't have a db, update in place
+        trajectory.successful_runs += 1
+        trajectory.last_successful_run = time.time()
+
     def mark_failure(self, trajectory):
-        trajectory.failed_runs += 1
         self.pool.remove(trajectory)
+        # temp, while we don't have a db, update in place
+        trajectory.failed_runs += 1
     
     def get_next_trajectory(self): # returns (candidate, exhausted)
         if not self.pool:
@@ -127,6 +142,7 @@ class StepGenerator:
 
             if len(candidate.steps) == len(self.steps_taken):
                 # trajectory completed
+                self.pool.mark_success(candidate)
                 return None
 
             # run precheck
@@ -285,3 +301,5 @@ if __name__ == "__main__":
     assert not cache_hit
 
     assert len(engine.db.get_trajectories()) == 2
+
+    print(engine.db.get_trajectories())
