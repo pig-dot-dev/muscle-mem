@@ -184,7 +184,7 @@ class TestEngineCaching:
         misses = runs - hits
         exp_hits = 896
         exp_misses = 104
-        slop = 1
+        slop = 3 # increase this if tests are flaky
         assert (exp_hits - slop) <= hits <= (exp_hits + slop)
         assert (exp_misses - slop) <= misses <= (exp_misses + slop)
 

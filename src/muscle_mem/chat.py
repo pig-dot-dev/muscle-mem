@@ -22,10 +22,12 @@ class Metrics:
             "RuntimeContext.strip": {"times": []},
             "RuntimeContext.inject": {"times": []},
             "Recorder.record": {"times": []},
-            "CandidateSet.sort": {"times": []},
-            "Replayer.get_next_step": {"times": []},
+            "CandidateQueue.sort": {"times": []},
+            "Planner.get_next_step": {"times": []},
             "PreCheck.capture": {"times": []},
             "PreCheck.compare": {"times": []},
+            "PostCheck.capture": {"times": []},
+            "PostCheck.compare": {"times": []},
             "Agent": {"times": []},
             "Cache.hit": {"count": 0},
             "Cache.miss": {"count": 0},
@@ -123,6 +125,7 @@ class Step:
     args: List[Any]
     kwargs: Dict[str, Any]
     pre_check_snapshot: Optional[Any] = None
+    post_check_snapshot: Optional[Any] = None
 
 @dataclass
 class Trajectory:
@@ -172,15 +175,16 @@ class Tool:
     func: Callable[..., Any]
     is_method: bool
     pre_check: Optional[Check]
+    post_check: Optional[Check]
 
 class ToolRegistry:
     def __init__(self, metrics: Metrics) -> None:
         self._tools: Dict[str, Tool] = {}
         self.metrics = metrics
 
-    def add_tool(self, func: Callable[..., Any], is_method: bool, pre_check: Optional[Check]) -> Tool:
+    def add_tool(self, func: Callable[..., Any], is_method: bool, pre_check: Optional[Check], post_check: Optional[Check]) -> Tool:
         with self.metrics.measure("Registry.register"):
-            tool = Tool(func=func, is_method=is_method, pre_check=pre_check)
+            tool = Tool(func=func, is_method=is_method, pre_check=pre_check, post_check=post_check)
             self._tools[func.__name__] = tool
             return tool
 
@@ -261,14 +265,16 @@ class Recorder:
         self.metrics = metrics
         self.steps: List[Step] = []
 
-    def record(self, tool: Tool, args: List[Any], kwargs: Dict[str, Any], pre_snap: Any) -> None:
+    def record(self, tool: Tool, args: List[Any], kwargs: Dict[str, Any], pre_snap: Any, post_snap: Any) -> None:
         with self.metrics.measure("Recorder.record"):
             stripped_args, stripped_kwargs = self.context.strip(args, kwargs)
-            step = Step(func_name=tool.func.__name__, args=stripped_args, kwargs=stripped_kwargs, pre_check_snapshot=pre_snap)
+            step = Step(func_name=tool.func.__name__, args=stripped_args, kwargs=stripped_kwargs, pre_check_snapshot=pre_snap, post_check_snapshot=post_snap)
             self.steps.append(step)
 
 # ---------------------- Validation & Replay ----------------------
-class CandidateSet:
+class CandidateQueue:
+    """CandidateQueue is a queue of trajectories that may be valid."""
+
     def __init__(self, trajectories: List[Trajectory], metrics: Metrics) -> None:
         self.trajectories = list(trajectories)
         self.metrics = metrics
@@ -280,7 +286,7 @@ class CandidateSet:
             age = now - t.last_successful_run
             return ratio * age
 
-        with self.metrics.measure("CandidateSet.sort"):
+        with self.metrics.measure("CandidateQueue.sort"):
             self.trajectories.sort(key=lambda t: sort_fn(t, now), reverse=True)
 
     def current(self) -> Optional[Trajectory]:
@@ -290,29 +296,46 @@ class CandidateSet:
         if self.trajectories:
             del self.trajectories[0]
 
-class Replayer:
+class Planner:
+    """The planner coordinates the selection of the next step to execute. It makes sure the step passes pre-checks."""
     def __init__(self, db: DB, registry: ToolRegistry, context: RuntimeContext, skill: Optional[str], metrics: Metrics) -> None:
         self.context = context
         self.registry = registry
         self.metrics = metrics
-        self.candidates = CandidateSet(db.get_trajectories(skill), metrics)
-        self.prefix: List[Step] = []
+        self.candidates = CandidateQueue(db.get_trajectories(skill), metrics)
+        self.prefix: List[Step] = [] # Steps already executed in this trajectory
         self.exhausted = False
 
-    def get_next_step(self) -> Optional[Step]:
-        with self.metrics.measure("Replayer.get_next_step"):
+    def get_next_step(self) -> Optional[Tuple[Step, Any]]: # Tuple(step, pre_check_snapshot)
+        with self.metrics.measure("Planner.get_next_step"):
             while True:
                 traj = self.candidates.current()
                 if not traj:
                     self.exhausted = True
                     return None
+
+                # If we've fully executed this trajectory, it's a success
                 if len(traj.steps) == len(self.prefix):
                     traj.successful_runs += 1
                     traj.last_successful_run = time.time()
                     return None
+
+                # If the current trajectory doesn't share the same prefix as the one we're building, it's invalid
+                for i, prev_step in enumerate(self.prefix):
+                    candidate_step = traj.steps[i]
+                    # TODO: better equality check
+                    if candidate_step.func_name != prev_step.func_name or candidate_step.args != prev_step.args or candidate_step.kwargs != prev_step.kwargs:
+                        traj.failed_runs += 1
+                        self.candidates.remove_current()
+                        return None
+                    
+
                 step = traj.steps[len(self.prefix)]
                 tool = self.registry.get_tool(step.func_name)
 
+
+                # Do pre-check if needed 
+                current = None
                 if step.pre_check_snapshot is not None and tool.pre_check:
                     with self.metrics.measure("PreCheck.capture"):
                         args, kwargs = self.context.inject(step.args, step.kwargs)
@@ -323,7 +346,8 @@ class Replayer:
                             self.candidates.remove_current()
                             continue
                 self.prefix.append(step)
-                return step
+                
+                return step, current
 
 # ---------------------- Orchestration ----------------------
 class Engine:
@@ -343,11 +367,7 @@ class Engine:
         self._db = DB(self.metrics)
         self._registry = ToolRegistry(self.metrics)
         self._context = RuntimeContext(self.metrics)
-        self._recorder = Recorder(
-            self._context, 
-            self._registry,
-            self.metrics
-        )
+        self._recorder = None # Unique per __call__
 
 
     def enable_metrics(self) -> None:
@@ -394,7 +414,7 @@ class Engine:
         self.finalized = True
         return self
 
-    def function(self, pre_check: Optional[Check] = None) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+    def function(self, pre_check: Optional[Check] = None, post_check: Optional[Check] = None) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
         """
         Decorator to register a standalone function as a tool with optional pre-execution Check.
 
@@ -404,9 +424,9 @@ class Engine:
         Returns:
             Callable: Decorator for the tool function.
         """
-        return self._register_tool(is_method=False, pre_check=pre_check)
+        return self._register_tool(is_method=False, pre_check=pre_check, post_check=post_check)
 
-    def method(self, pre_check: Optional[Check] = None) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+    def method(self, pre_check: Optional[Check] = None, post_check: Optional[Check] = None) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
         """
         Decorator to register an object method as a tool with optional pre-execution Check.
 
@@ -416,18 +436,21 @@ class Engine:
         Returns:
             Callable: Decorator for the tool method.
         """
-        return self._register_tool(is_method=True, pre_check=pre_check)
+        return self._register_tool(is_method=True, pre_check=pre_check, post_check=post_check)
 
-    def _register_tool(self, is_method: bool, pre_check: Optional[Check]) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+    def _register_tool(self, is_method: bool, pre_check: Optional[Check], post_check: Optional[Check]) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
         """Internal helper to wrap and register tool functions or methods."""
         def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
-            tool = self._registry.add_tool(func, is_method, pre_check)
+            tool = self._registry.add_tool(func, is_method, pre_check, post_check)
             @functools.wraps(func)
             def wrapper(*args: Any, **kwargs: Any) -> Any:
+                if self._recorder is None:
+                    # We're not in a __call__ context, just execute the function
+                    return func(*args, **kwargs)
                 pre_snap = tool.pre_check.capture(*args, **kwargs) if tool.pre_check else None
                 result = func(*args, **kwargs)
-                if hasattr(self, '_recorder') and self._recorder and tool.pre_check:
-                    self._recorder.record(tool, args, kwargs, pre_snap)
+                post_snap = tool.post_check.capture(*args, **kwargs) if tool.post_check else None
+                self._recorder.record(tool, args, kwargs, pre_snap, post_snap)
                 return result
             return wrapper
         return decorator
@@ -453,22 +476,43 @@ class Engine:
             if params: 
                 self._context.set_params(params) # Overwrite params in context
             
-            replayer = Replayer(self._db, self._registry, self._context, skill, self.metrics)
+            # Reset recorder before any tools are invoked
+            self._recorder = Recorder(self._context, self._registry, self.metrics)
 
-            while (step := replayer.get_next_step()):
+            # Planner tells us the next step to take
+            planner = Planner(self._db, self._registry, self._context, skill, self.metrics)
+            while (res := planner.get_next_step()):
+                step, pre_snap = res # step is pre-validated, snapshot attached
+
                 tool = self._registry.get_tool(step.func_name)
                 real_args, real_kwargs = self._context.inject(step.args, step.kwargs)
                 tool.func(*real_args, **real_kwargs)
 
-            if replayer.exhausted:
-                # miss: record new trajectory via agent mode
+                # Do post-check if needed
+                # TODO: I don't like that engine does post-check but Planner does pre-check
+                post_snap = None
+                if tool.post_check:
+                    with self.metrics.measure("PostCheck.capture"):
+                        post_snap = tool.post_check.capture(*real_args, **real_kwargs)
+                    with self.metrics.measure("PostCheck.compare"):
+                        if not tool.post_check.compare(post_snap, step.post_check_snapshot):
+                            # TODO: decide what to do here. Bail for now
+                            raise ValueError("Post-check failed at runtime")
+                                
+                self._recorder.record(tool, real_args, real_kwargs, pre_snap, post_snap)
+
+            if planner.exhausted:
+                # cache miss
+                # exhausted: no trajectory in cache was fully completed.
+                # continue in agent mode
                 self.metrics.increment("Cache.miss")
-                self._recorder = Recorder(self._context, self._registry, self.metrics)
                 with self.metrics.measure("Agent"):
                     self.agent(*args, **kwargs)
+
+                # only add trajectory if it contains novel steps
                 self._db.add_trajectory(skill, self._recorder.steps)
-                del self._recorder
                 return False
-            # hit
+
+            # full cache hit
             self.metrics.increment("Cache.hit")
             return True
