@@ -1,6 +1,7 @@
 import pytest
 
 import muscle_mem as mm
+import random
 
 
 class TestEngineCaching:
@@ -10,6 +11,7 @@ class TestEngineCaching:
 
         # Create and configure engine
         engine = mm.Engine()
+        engine.metrics.enable()
 
         # Create environment
         class Env:
@@ -69,8 +71,6 @@ class TestEngineCaching:
         """Test basic cache miss and hit scenarios."""
         env, _, engine = setup
 
-        # engine.metrics.enable()
-
         # Initial cache miss 0->1
         assert env.val == 0
         assert not engine("add 1")
@@ -104,7 +104,7 @@ class TestEngineCaching:
             assert engine("add 1")
             assert env.val == 1
 
-        # engine.metrics.report()
+        engine.metrics.report()
 
     def test_multi_step(self, setup):
         env, _, engine = setup
@@ -149,3 +149,34 @@ class TestEngineCaching:
         env.val = 0
         assert engine("add 2", params={"n": 2}, skill="add")
         assert env.val == 2  # cache hit, but dynamic param was used
+
+
+    def test_exponential(self, setup):
+        env, _, engine = setup
+
+        env.val = 0
+        for _ in range(1000):
+            assert not engine("add 3", skill="add") # all cache misses, accumulating 1000 trajectories. Search time may grow n^2.
+        engine.metrics.report() 
+
+        assert len(engine.db.get_trajectories("add")) == 1000
+
+
+    def test_random(self, setup):
+        env, _, engine = setup
+
+        # deterministic randomness
+        # with this seed and 1000 iterations, we always should get 104 misses and 896 hits
+        random.seed(42) 
+
+        for _ in range(1000):
+            initial = random.randint(0, 100)
+            n = random.randint(1, 10)
+            param = random.randint(1, 10)
+            env.val = initial
+            engine(f"add {n}", params={"n": param}, skill="add")
+
+        assert engine.metrics.get("Cache.miss").get("count") == 104
+        assert engine.metrics.get("Cache.hit").get("count") == 896
+
+        engine.metrics.report()
