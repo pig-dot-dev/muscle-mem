@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, TypeVar, ParamSpec, Tuple
+from typing import Any, Callable, Dict, List, Optional, TypeVar, ParamSpec, Tuple, ContextManager
 import functools
 import time
 from contextlib import contextmanager
@@ -10,7 +10,7 @@ import time
 from contextlib import contextmanager
 
 class Metrics:
-    def __init__(self):
+    def __init__(self) -> None:
         self.enabled = False
         # Use exact Python function identifiers as keys
         self.metrics = {
@@ -32,14 +32,14 @@ class Metrics:
         }
         self.results = None # computed
 
-    def enable(self):
+    def enable(self) -> None:
         self.enabled = True
 
-    def disable(self):
+    def disable(self) -> None:
         self.enabled = False
 
     @contextmanager
-    def measure(self, func_name: str):
+    def measure(self, func_name: str) -> ContextManager[None]:
         """
         Record a timing sample for the given Python function identifier.
         """
@@ -67,7 +67,7 @@ class Metrics:
             self.compute()
         return self.results[name]
 
-    def compute(self):
+    def compute(self) -> None:
         if self.results:
             return
         self.results: Dict[str, Any] = {}
@@ -103,7 +103,7 @@ class Metrics:
             elif "count" in entry:
                 self.results[name] = {"count": entry.get("count", 0)}
 
-    def report(self):
+    def report(self) -> None:
         if not self.enabled:
             return
         if not self.results:
@@ -133,7 +133,7 @@ class Trajectory:
 
 # ---------------------- Persistence Layer ----------------------
 class DB:
-    def __init__(self, metrics: Metrics):
+    def __init__(self, metrics: Metrics) -> None:
         self._storage: Dict[str, List[Trajectory]] = {}
         self.metrics = metrics
 
@@ -149,7 +149,21 @@ class DB:
 
 # ---------------------- Tool Registration ----------------------
 class Check:
+    """
+    Checks ensure it’s safe to reuse cached tool-call sequences by capturing and comparing environment state.
+
+    Each Check has:
+        - capture: function to capture relevant environment features
+        - compare: function to validate current capture against cached capture
+    """
     def __init__(self, capture: Callable[..., Any], compare: Callable[[Any, Any], bool]):
+        """
+        Initialize a Check with capture and compare callbacks.
+
+        Args:
+            capture: Function to extract features from the current environment.
+            compare: Function to compare current features with a cached capture, returning True if safe.
+        """
         self.capture = capture
         self.compare = compare
 
@@ -160,7 +174,7 @@ class Tool:
     pre_check: Optional[Check]
 
 class ToolRegistry:
-    def __init__(self, metrics: Metrics):
+    def __init__(self, metrics: Metrics) -> None:
         self._tools: Dict[str, Tool] = {}
         self.metrics = metrics
 
@@ -192,12 +206,12 @@ class Arg:
             raise ValueError("STATIC args need a value")
 
 class RuntimeContext:
-    def __init__(self, metrics: Metrics, method_dep: Any = None, params: Optional[Dict[str, Any]] = None):
+    def __init__(self, metrics: Metrics, method_dep: Any = None, params: Optional[Dict[str, Any]] = None) -> None:
         self.method_dep = method_dep
         self.params = params or {}
         self.metrics = metrics
 
-    def set_params(self, params: Dict[str, Any]):
+    def set_params(self, params: Dict[str, Any]) -> None:
         self.params = params
 
     def strip(self, args: List[Any], kwargs: Dict[str, Any]) -> Tuple[List[Arg], Dict[str, Arg]]:
@@ -241,7 +255,7 @@ class RuntimeContext:
 
 # ---------------------- Recording ---------------------- ----------------------
 class Recorder:
-    def __init__(self, context: RuntimeContext, registry: ToolRegistry, metrics: Metrics):
+    def __init__(self, context: RuntimeContext, registry: ToolRegistry, metrics: Metrics) -> None:
         self.context = context
         self.registry = registry
         self.metrics = metrics
@@ -255,7 +269,7 @@ class Recorder:
 
 # ---------------------- Validation & Replay ----------------------
 class CandidateSet:
-    def __init__(self, trajectories: List[Trajectory], metrics: Metrics):
+    def __init__(self, trajectories: List[Trajectory], metrics: Metrics) -> None:
         self.trajectories = list(trajectories)
         self.metrics = metrics
         now = time.time()
@@ -277,7 +291,7 @@ class CandidateSet:
             del self.trajectories[0]
 
 class Replayer:
-    def __init__(self, db: DB, registry: ToolRegistry, context: RuntimeContext, skill: Optional[str], metrics: Metrics):
+    def __init__(self, db: DB, registry: ToolRegistry, context: RuntimeContext, skill: Optional[str], metrics: Metrics) -> None:
         self.context = context
         self.registry = registry
         self.metrics = metrics
@@ -313,7 +327,12 @@ class Replayer:
 
 # ---------------------- Orchestration ----------------------
 class Engine:
-    def __init__(self):
+    """
+    Engine wraps an agent with muscle-memory caching: recording and replaying tool-call trajectories.
+
+    On cache miss, it falls back to the provided agent callable and records new trajectories.
+    """
+    def __init__(self) -> None:
         self.metrics = Metrics()
 
         # User-determined state
@@ -332,31 +351,76 @@ class Engine:
 
 
     def enable_metrics(self) -> None:
+        """Dangerous: Enable performance metrics collection. Metrics is lazily implemented and will lead to memory leaks."""
         self.metrics.enable()
 
     def disable_metrics(self) -> None:
+        """Disable performance metrics collection."""
         self.metrics.disable()
 
     def set_agent(self, agent: Callable[P, R]) -> "Engine":
+        """
+        Set the fallback agent to invoke when no cached trajectory matches.
+
+        Args:
+            agent: Callable to execute on cache miss.
+
+        Returns:
+            Engine: self, for chaining.
+        """
         self.agent = agent
         return self
 
     def bind_instance(self, instance: Any) -> "Engine":
+        """
+        Bind an object instance for method-based tool injection.
+
+        Args:
+            instance: The object to inject as 'self' when replaying methods.
+
+        Returns:
+            Engine: self, for chaining.
+        """
         self._context.method_dep = instance
         return self
 
     def finalize(self) -> "Engine":
+        """
+        Finalize tool registrations and prevent further modifications.
+
+        Returns:
+            Engine: self after finalization.
+        """
         self.finalized = True
         return self
 
-    def function(self, pre_check: Optional[Check] = None):
+    def function(self, pre_check: Optional[Check] = None) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+        """
+        Decorator to register a standalone function as a tool with optional pre-execution Check.
+
+        Args:
+            pre_check: Optional Check to validate environment before execution.
+
+        Returns:
+            Callable: Decorator for the tool function.
+        """
         return self._register_tool(is_method=False, pre_check=pre_check)
 
-    def method(self, pre_check: Optional[Check] = None):
+    def method(self, pre_check: Optional[Check] = None) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+        """
+        Decorator to register an object method as a tool with optional pre-execution Check.
+
+        Args:
+            pre_check: Optional Check to validate environment before execution.
+
+        Returns:
+            Callable: Decorator for the tool method.
+        """
         return self._register_tool(is_method=True, pre_check=pre_check)
 
-    def _register_tool(self, is_method: bool, pre_check: Optional[Check]):
-        def decorator(func: Callable[..., Any]):
+    def _register_tool(self, is_method: bool, pre_check: Optional[Check]) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+        """Internal helper to wrap and register tool functions or methods."""
+        def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
             tool = self._registry.add_tool(func, is_method, pre_check)
             @functools.wraps(func)
             def wrapper(*args: Any, **kwargs: Any) -> Any:
@@ -369,6 +433,18 @@ class Engine:
         return decorator
 
     def __call__(self, *args: Any, skill: Optional[str] = None, params: Optional[Dict[str, Any]] = None, **kwargs: Any) -> bool:
+        """
+        Execute a task via the engine: replay cached steps or call agent on cache miss.
+
+        Args:
+            *args: Positional args for the agent callable.
+            skill: Optional tag to select trajectory bucket.
+            params: Optional mapping of parameter names to values for dynamic args.
+            **kwargs: Keyword args for the agent callable.
+
+        Returns:
+            bool: True on cache hit, False on cache miss.
+        """
         # track call timing
         with self.metrics.measure("Engine.__call__"):
             if not self.finalized:
