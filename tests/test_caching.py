@@ -46,7 +46,7 @@ class TestEngineCaching:
         agent = Agent(env)
 
         # Setup engine
-        engine.set_context(env)
+        engine.bind_instance(env)
         engine.set_agent(agent)
         engine.finalize()
 
@@ -69,7 +69,7 @@ class TestEngineCaching:
         """Test basic cache miss and hit scenarios."""
         env, _, engine = setup
 
-        engine.metrics.enable()
+        # engine.metrics.enable()
 
         # Initial cache miss 0->1
         assert env.val == 0
@@ -104,7 +104,7 @@ class TestEngineCaching:
             assert engine("add 1")
             assert env.val == 1
 
-        engine.metrics.report()
+        # engine.metrics.report()
 
     def test_multi_step(self, setup):
         env, _, engine = setup
@@ -119,33 +119,33 @@ class TestEngineCaching:
         assert engine("add 2")
         assert env.val == 2
 
-    def test_tags(self, setup):
+    def test_skills(self, setup):
         env, _, engine = setup
 
         env.val = 0
-        assert not engine("add 1", tags=["tag1"])
+        assert not engine("add 1", skill="skill1")
         assert env.val == 1
 
         env.val = 0
-        assert engine("add 1", tags=["tag1"])
+        assert engine("add 1", skill="skill1")
         assert env.val == 1
 
-        # different tag should miss
+        # different skill should miss
         env.val = 0
-        assert not engine("add 1", tags=["tag2"])
+        assert not engine("add 1", skill="skill2")
         assert env.val == 1
 
         env.val = 0
-        assert engine("add 1", tags=["tag2"])
+        assert engine("add 1", skill="skill2")
         assert env.val == 1
 
     def test_parameterization(self, setup):
         env, _, engine = setup
 
         env.val = 0
-        assert not engine("add 1", params={"n": 1}, tags=["add"])
+        assert not engine("add 1", params={"n": 1}, skill="add")
         assert env.val == 1
 
         env.val = 0
-        assert engine("add 2", params={"n": 2}, tags=["add"])
+        assert engine("add 2", params={"n": 2}, skill="add")
         assert env.val == 2  # cache hit, but dynamic param was used

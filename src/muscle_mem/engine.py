@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 import functools
-from typing import List, Optional
+from typing import ParamSpec, TypeVar, Dict, Any, List, Optional
 from dataclasses import field
 import time
 from colorama import Fore, Style
@@ -24,16 +24,26 @@ class Trajectory:
     failed_runs: int = 0
     last_successful_run: float = 0
 
+P = ParamSpec("P")
+R = TypeVar("R")
+
+
 class DB:
     def __init__(self):
-        self.trajectories = []
+        self.trajectories: Dict[str, List[Trajectory]] = {}
     
-    def add_trajectory(self, steps):
+    def add_trajectory(self, skill, steps):
+        skill = skill or ""
         trajectory = Trajectory(steps=steps, successful_runs=1, failed_runs=0, last_successful_run=time.time())
-        self.trajectories.append(trajectory)
+        if skill not in self.trajectories:
+            self.trajectories[skill] = []
+        self.trajectories[skill].append(trajectory)
 
-    def get_trajectories(self):
-        return self.trajectories
+    def get_trajectories(self, skill):
+        skill = skill or ""
+        if skill not in self.trajectories:
+            return []
+        return self.trajectories[skill]
 
 class Check:
     def __init__(self, capture, compare):
@@ -41,17 +51,18 @@ class Check:
         self.compare = compare
 
 class Tool:
-    def __init__(self, func, pre_check):
+    def __init__(self, func, is_method, pre_check):
         self.func = func
         self.func_name = func.__name__
+        self.is_method = is_method
         self.pre_check = pre_check
 
 class Registry:
     def __init__(self):
         self.tools = {}
 
-    def register(self, func, pre_check):
-        tool = Tool(func, pre_check)
+    def register(self, func, is_method, pre_check):
+        tool = Tool(func, is_method, pre_check)
         self.tools[tool.func_name] = tool
         return tool
 
@@ -60,9 +71,9 @@ class Registry:
 
 class Pool:
     """Maintains a pool of candidate trajectories"""
-    def __init__(self, db):
+    def __init__(self, db: DB, skill):
         self.db = db
-        self.pool = db.get_trajectories()
+        self.pool = db.get_trajectories(skill=skill)
         self.steps_taken = []
         self.sort()
 
@@ -121,6 +132,18 @@ class Pool:
 
         # return next step
         return self.pool[0], False
+
+@dataclass(frozen=True)
+class Arg:
+    is_param: bool
+    param_key: Optional[str] = None  # Lookup key, if parameterized
+    static_value: Any = None  # Static value, if not parameterized
+
+    def __post_init__(self):
+        if self.is_param and self.param_key is None:
+            raise ValueError("Parameterized arguments must have a param_key")
+        if not self.is_param and self.static_value is None:
+            raise ValueError("Static arguments must have a static_value")
         
 class ArgsContext:
     def __init__(self, dep_instance, params):
@@ -129,21 +152,64 @@ class ArgsContext:
     
     def strip(self, args, kwargs):
         """strip self and params from args and kwargs"""
-        # todo
-        return args, kwargs
+        if self.dep_instance is not None:
+            args = args[1:]
 
-    def inject(self, args, kwargs):
+        stripped_args = []
+        for val in args:
+            # assume static by default
+            arg = Arg(is_param=False, static_value=val)
+            if self.params:
+                for k, v in self.params.items():
+                    if val == v:
+                        # we've detected a top level parameter has been used in the args, strip static value and replace with param key
+                        arg = Arg(is_param=True, param_key=k, static_value=None)
+            stripped_args.append(arg)
+        
+        stripped_kwargs = {}
+        for key, val in kwargs.items():
+            arg = Arg(is_param=False, static_value=val)
+            if self.params:
+                for k, v in self.params.items():
+                    if val == v:
+                        # we've detected a top level parameter has been used in the kwargs, strip static value and replace with param key
+                        arg = Arg(is_param=True, param_key=k, static_value=None)
+            stripped_kwargs[key] = arg
+        
+        return stripped_args, stripped_kwargs
+
+    def inject(self, args: List[Arg], kwargs: Dict[str, Arg]):
         """inject self and params into args and kwargs"""
-        # todo
-        return args, kwargs
+        injected_args = []
+        if self.dep_instance is not None:
+            injected_args.append(self.dep_instance)
+        
+        for arg in args:
+            if arg.is_param:
+                if not self.params or arg.param_key not in self.params:
+                    raise ValueError(f"Parameter {arg.param_key} not found in context")
+                injected_args.append(self.params[arg.param_key])
+            else:
+                injected_args.append(arg.static_value)
 
+        injected_kwargs = {}
+        for key, arg in kwargs.items():
+            if arg.is_param:
+                if not self.params or arg.param_key not in self.params:
+                    raise ValueError(f"Parameter {arg.param_key} not found in context")
+                injected_kwargs[key] = self.params[arg.param_key]
+            else:
+                injected_kwargs[key] = arg.static_value
 
+        
+        return injected_args, injected_kwargs
+        
 class StepGenerator:
-    def __init__(self, db, registry, args_context):
+    def __init__(self, db, registry, skill, args_context):
         self.db = db
         self.registry = registry
         self.args_context = args_context
-        self.pool = Pool(db)
+        self.pool = Pool(db, skill)
         self.steps_taken = [] # steps already executed
         self.exhausted = False
     
@@ -162,10 +228,12 @@ class StepGenerator:
 
             # run precheck
             step = candidate.steps[len(self.steps_taken)]
-            if step.pre_check_snapshot:
+            if step.pre_check_snapshot != None:
                 args = step.args
                 kwargs = step.kwargs
+
                 args, kwargs = self.args_context.inject(args, kwargs)
+
 
                 # get impl
                 tool = self.registry.get_tool(step)
@@ -198,13 +266,20 @@ class Engine:
     def set_agent(self, agent):
         self.agent = agent
         return self
+
+    def set_context(self, instance):
+        self.args_context.dep_instance = instance
+        return self
     
     def finalize(self):
         self.finalized = True
         return self
     
     def function(self, pre_check):
-        return self._register_tool(pre_check=pre_check)
+        return self._register_tool(pre_check=pre_check, is_method=False)
+
+    def method(self, pre_check):
+        return self._register_tool(pre_check=pre_check, is_method=True)
 
     def _store_step(self, tool, args, kwargs, pre_check_snapshot):
         args, kwargs = self.args_context.strip(args, kwargs)
@@ -217,13 +292,20 @@ class Engine:
             )
         )
 
-    def __call__(self, *args, **kwargs):
+    def __call__(
+        self,
+        *args: P.args,  # Positional arguments passed to the agent callable
+        skill: Optional[str] = None, # Optional skill name
+        params: Optional[Dict[str, Any]] = None,
+        **kwargs: P.kwargs,  # Keyword arguments passed to the agent callable
+    ) -> bool: 
         if not self.finalized:
             self.finalize()
 
-        self.args_context = ArgsContext(None, None) # todo: actually build this. also saving it to instance state is sketch but assume single thread
+        self.args_context.params = params
+
         
-        step_generator = StepGenerator(self.db, self.registry, self.args_context) # todo: pass in args_context
+        step_generator = StepGenerator(self.db, self.registry, skill, self.args_context) # todo: pass in args_context
         while True:
             step = step_generator.get_next_step()
             if step is None:
@@ -231,7 +313,8 @@ class Engine:
 
             tool = self.registry.get_tool(step)
             print(Fore.GREEN, end="")
-            tool.func(*step.args, **step.kwargs)
+            step_args, step_kwargs = self.args_context.inject(step.args, step.kwargs)
+            tool.func(*step_args, **step_kwargs)
             print(Style.RESET_ALL, end="")
             
         steps_taken, exhausted = step_generator.summary()
@@ -243,15 +326,15 @@ class Engine:
             self.agent(*args, **kwargs)
             print(Style.RESET_ALL, end="")
 
-            self.db.add_trajectory(self.steps_taken)
+            self.db.add_trajectory(skill, self.steps_taken)
             return False
 
         return True
         
 
-    def _register_tool(self, pre_check):
+    def _register_tool(self, pre_check, is_method):
         def decorator(func):
-            tool = self.registry.register(func, pre_check)
+            tool = self.registry.register(func, is_method, pre_check)
             
             @functools.wraps(func)
             def wrapper(*args, **kwargs):
@@ -312,7 +395,6 @@ if __name__ == "__main__":
     # Rerunning same 0.9s task within compare timeout is cache hit + new trajectory
     cache_hit = engine("john")
     assert cache_hit
-
     assert len(engine.db.get_trajectories()) == 1
 
     # Break cache
@@ -321,5 +403,3 @@ if __name__ == "__main__":
     assert not cache_hit
 
     assert len(engine.db.get_trajectories()) == 2
-
-    print(engine.db.get_trajectories())
