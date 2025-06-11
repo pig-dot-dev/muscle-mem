@@ -192,10 +192,13 @@ class Arg:
             raise ValueError("STATIC args need a value")
 
 class RuntimeContext:
-    def __init__(self, method_dep: Any = None, params: Optional[Dict[str, Any]] = None, metrics: Metrics = None):
+    def __init__(self, metrics: Metrics, method_dep: Any = None, params: Optional[Dict[str, Any]] = None):
         self.method_dep = method_dep
         self.params = params or {}
         self.metrics = metrics
+
+    def set_params(self, params: Dict[str, Any]):
+        self.params = params
 
     def strip(self, args: List[Any], kwargs: Dict[str, Any]) -> Tuple[List[Arg], Dict[str, Arg]]:
         with self.metrics.measure("RuntimeContext.strip"):
@@ -312,11 +315,21 @@ class Replayer:
 class Engine:
     def __init__(self):
         self.metrics = Metrics()
-        self.db = DB(self.metrics)
-        self.registry = ToolRegistry(self.metrics)
-        self.context = RuntimeContext(metrics=self.metrics)
+
+        # User-determined state
         self.agent: Optional[Callable[..., Any]] = None
         self.finalized = False
+
+        # Subcomponents
+        self._db = DB(self.metrics)
+        self._registry = ToolRegistry(self.metrics)
+        self._context = RuntimeContext(self.metrics)
+        self._recorder = Recorder(
+            self._context, 
+            self._registry,
+            self.metrics
+        )
+
 
     def enable_metrics(self) -> None:
         self.metrics.enable()
@@ -329,7 +342,7 @@ class Engine:
         return self
 
     def bind_instance(self, instance: Any) -> "Engine":
-        self.context.method_dep = instance
+        self._context.method_dep = instance
         return self
 
     def finalize(self) -> "Engine":
@@ -344,7 +357,7 @@ class Engine:
 
     def _register_tool(self, is_method: bool, pre_check: Optional[Check]):
         def decorator(func: Callable[..., Any]):
-            tool = self.registry.add_tool(func, is_method, pre_check)
+            tool = self._registry.add_tool(func, is_method, pre_check)
             @functools.wraps(func)
             def wrapper(*args: Any, **kwargs: Any) -> Any:
                 pre_snap = tool.pre_check.capture(*args, **kwargs) if tool.pre_check else None
@@ -360,21 +373,24 @@ class Engine:
         with self.metrics.measure("Engine.__call__"):
             if not self.finalized:
                 self.finalize()
-            self.context = RuntimeContext(method_dep=self.context.method_dep, params=params, metrics=self.metrics)
-            replayer = Replayer(self.db, self.registry, self.context, skill, self.metrics)
+
+            if params: 
+                self._context.set_params(params) # Overwrite params in context
+            
+            replayer = Replayer(self._db, self._registry, self._context, skill, self.metrics)
 
             while (step := replayer.get_next_step()):
-                tool = self.registry.get_tool(step.func_name)
-                real_args, real_kwargs = self.context.inject(step.args, step.kwargs)
+                tool = self._registry.get_tool(step.func_name)
+                real_args, real_kwargs = self._context.inject(step.args, step.kwargs)
                 tool.func(*real_args, **real_kwargs)
 
             if replayer.exhausted:
                 # miss: record new trajectory via agent mode
                 self.metrics.increment("Cache.miss")
-                self._recorder = Recorder(self.context, self.registry, self.metrics)
+                self._recorder = Recorder(self._context, self._registry, self.metrics)
                 with self.metrics.measure("Agent"):
                     self.agent(*args, **kwargs)
-                self.db.add_trajectory(skill, self._recorder.steps)
+                self._db.add_trajectory(skill, self._recorder.steps)
                 del self._recorder
                 return False
             # hit

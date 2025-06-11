@@ -2,6 +2,7 @@ import pytest
 
 import muscle_mem as mm
 import random
+import time
 
 
 class TestEngineCaching:
@@ -159,7 +160,7 @@ class TestEngineCaching:
             assert not engine("add 3", skill="add") # all cache misses, accumulating 1000 trajectories. Search time may grow n^2.
         engine.metrics.report() 
 
-        assert len(engine.db.get_trajectories("add")) == 1000
+        assert len(engine._db.get_trajectories("add")) == 1000
 
 
     def test_random(self, setup):
@@ -167,16 +168,24 @@ class TestEngineCaching:
 
         # deterministic randomness
         # with this seed and 1000 iterations, we always should get 104 misses and 896 hits
+        # but we can't completely assert this because of clock jitter in DB's time based sorting
         random.seed(42) 
 
-        for _ in range(1000):
+        runs = 1000
+        hits = 0
+        for _ in range(runs):
             initial = random.randint(0, 100)
             n = random.randint(1, 10)
             param = random.randint(1, 10)
             env.val = initial
-            engine(f"add {n}", params={"n": param}, skill="add")
+            if engine(f"add {n}", params={"n": param}, skill="add"):
+                hits += 1
 
-        assert engine.metrics.get("Cache.miss").get("count") == 104
-        assert engine.metrics.get("Cache.hit").get("count") == 896
+        misses = runs - hits
+        exp_hits = 896
+        exp_misses = 104
+        slop = 1
+        assert (exp_hits - slop) <= hits <= (exp_hits + slop)
+        assert (exp_misses - slop) <= misses <= (exp_misses + slop)
 
         engine.metrics.report()
