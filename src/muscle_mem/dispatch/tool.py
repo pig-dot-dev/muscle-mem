@@ -1,12 +1,7 @@
 import ast
 import hashlib
 import inspect
-from typing import Any, Callable, Dict, List, Optional, TypeVar
-
-try:
-    from typing import ParamSpec
-except ImportError:
-    from typing_extensions import ParamSpec
+from typing import Any, Callable, Dict, List, Optional, ParamSpec, TypeVar
 
 from ..storage.types.arg import Arg
 from ..storage.types.step import Step

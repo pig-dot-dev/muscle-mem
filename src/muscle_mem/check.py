@@ -1,9 +1,4 @@
-from typing import Callable, Generic, TypeVar, Union
-
-try:
-    from typing import ParamSpec
-except ImportError:
-    from typing_extensions import ParamSpec
+from typing import Callable, Generic, ParamSpec, TypeVar, Union
 
 # Typing for wrapped user function
 P = ParamSpec("P")  # The wrapped function's parameter types
