@@ -1,6 +1,11 @@
 import functools
 from contextlib import contextmanager
-from typing import Any, Callable, Dict, Generic, List, Optional, ParamSpec, Set, Tuple, TypeVar
+from typing import Any, Callable, Dict, Generic, List, Optional, Set, Tuple, TypeVar
+
+try:
+    from typing import ParamSpec  # Python 3.10+
+except ImportError:
+    from typing_extensions import ParamSpec
 
 from colorama import Fore, Style
 
@@ -146,7 +151,7 @@ class Engine(Generic[P, R]):
         Call the engine to perform a task, as you would your agent.
 
         All args are passed unmodified to the agent callable, except for reserved args.
-        
+
         Reserved keyword args:
             tags: Optional[List[str]] - tags to filter trajectories by
             params: Optional[Dict[str, Any]] - top level parameters for parameterized trajectories
