@@ -11,7 +11,7 @@ class Step:
     is_method: bool  # Whether this function is a method (needs self)
     args: List[Arg]  # Positional arguments (may be parameterized)
     kwargs: Dict[str, Arg]  # Keyword arguments (may be parameterized)
-    signature_hash: int = None  # Hash of function signature for memoization
+    signature_hash: Optional[int] = None  # Hash of function signature for memoization
     pre_check_snapshot: Optional[Any] = None
     post_check_snapshot: Optional[Any] = None
 
