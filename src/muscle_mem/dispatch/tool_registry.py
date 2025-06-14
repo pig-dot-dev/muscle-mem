@@ -9,7 +9,7 @@ class ToolRegistry:
     def __init__(self):
         self._tools: Dict[Tuple[str, int], Tool] = {}
 
-    def register(self, func: Callable, is_method: bool = False, pre_check: Optional[Check] = None, post_check: Optional[Check] = None) -> None:
+    def register(self, func: Callable, is_method: bool = False, pre_check: Optional[Check] = None, post_check: Optional[Check] = None) -> Tool:
         """Register a function with its hash"""
         tool = Tool(func, is_method, pre_check, post_check)
         if (tool.func_name, tool.func_hash) in self._tools:
