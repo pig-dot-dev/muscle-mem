@@ -50,3 +50,8 @@ lint.ignore = []
 lint.dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
 
 line-length = 160
+
+[dependency-groups]
+dev = [
+    "pytest>=7.4.4",
+]
