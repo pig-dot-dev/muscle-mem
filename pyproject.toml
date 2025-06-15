@@ -10,7 +10,7 @@ authors = [
 ]
 description = "muscle memory"
 readme = "README.md"
-requires-python = ">=3.7"
+requires-python = ">=3.10"
 dependencies = [
     "colorama"
 ]
