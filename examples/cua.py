@@ -6,6 +6,7 @@ that interacts with computer interfaces through images.
 """
 
 import base64
+import os
 
 import torch
 from openai import OpenAI
@@ -13,7 +14,7 @@ from openai.types.responses import ResponseInputImageParam, ResponseInputTextPar
 from openai.types.responses.response_input_item_param import Message
 from PIL import Image, ImageDraw
 from transformers import CLIPModel, CLIPProcessor
-import os
+
 from muscle_mem import Check, Engine
 
 # Load CLIP model for embeddings
@@ -24,6 +25,7 @@ print("CLIP model loaded\n")
 
 engine = Engine()
 
+
 class ImageEnv:
     def __init__(self, image_path: str):
         self.image_path = image_path
@@ -32,22 +34,16 @@ class ImageEnv:
         self.annotated_path = os.path.join("outputs", "annotated.png")
 
     # ----------------------
-    # Muscle Mem tool definition. 
+    # Muscle Mem tool definition.
     def embed_click_region(self, x, y):
         return self.get_region_embedding(x, y, 100)
-    
+
     @staticmethod
     def compare_click_region(current, candidate):
-        similarity = torch.nn.functional.cosine_similarity(
-            current, candidate, dim=1).item()
+        similarity = torch.nn.functional.cosine_similarity(current, candidate, dim=1).item()
         return True if similarity >= 0.8 else False
 
-    @engine.method(
-        pre_check= Check( 
-            capture=embed_click_region, 
-            compare=compare_click_region
-        )
-    )
+    @engine.method(pre_check=Check(capture=embed_click_region, compare=compare_click_region))
     def click(self, x: int, y: int) -> str:
         print(f"Clicked ({x}, {y})")
         self._annotate_click(x, y)
@@ -55,19 +51,18 @@ class ImageEnv:
 
     # ----------------------
     # Helpers
-    
+
     def set_state(self, image_path: str):
         self.image_path = image_path
         self.image = Image.open(image_path)
 
     def get_screenshot(self) -> Image.Image:
         return self.image
-    
+
     def get_screenshot_base64(self) -> str:
         with open(self.image_path, "rb") as image_file:
             return base64.b64encode(image_file.read()).decode("utf-8")
 
-    
     def _annotate_click(self, x: int, y: int):
         img = self.image.copy()
         draw = ImageDraw.Draw(img)
@@ -76,75 +71,63 @@ class ImageEnv:
         dot_radius = 10
         draw.ellipse(
             [(x - dot_radius, y - dot_radius), (x + dot_radius, y + dot_radius)],
-            fill=(0, 255, 0)  # Green color in RGB
+            fill=(0, 255, 0),  # Green color in RGB
         )
         img.save(self.annotated_path)
-    
+
     def get_region(self, x: int, y: int, size: int = 100) -> Image.Image:
         left = max(0, x - size)
         top = max(0, y - size)
         right = min(self.image.width, x + size)
         bottom = min(self.image.height, y + size)
         return self.image.crop((left, top, right, bottom))
-    
+
     def get_region_embedding(self, x: int, y: int, size: int = 100) -> torch.Tensor:
         cropped_image = self.get_region(x, y, size)
         inputs = processor(images=cropped_image, return_tensors="pt", padding=True)
         with torch.no_grad():
             image_features = model.get_image_features(**inputs)
         image_embedding = image_features / image_features.norm(dim=1, keepdim=True)
-        
+
         return image_embedding
-    
+
 
 class Agent:
     """Agent that can interact with the environment."""
+
     def __init__(self, environment: ImageEnv):
         self.client = OpenAI()
         self.env = environment
-    
+
     def __call__(self, task: str) -> None:
         screenshot_base64 = self.env.get_screenshot_base64()
 
         messages = [
-                Message(
-                    content=[
-                        ResponseInputTextParam(text=task, type="input_text"),
-                        ResponseInputImageParam(detail="high", image_url=f"data:image/jpeg;base64,{screenshot_base64}", type="input_image")
-                    ],
-                    role="user"
-                ),
-                Message(
-                    content=[
-                        ResponseOutputText(
-                            annotations=[], 
-                            text='Please confirm you want me to proceed?',
-                            type='output_text')
-                    ], 
-                    role='assistant'
-                ),
-                Message(
-                    content=[
-                        ResponseInputTextParam(text="Yes", type="input_text"),
-                    ],
-                    role="user"
-                )
-            ]
+            Message(
+                content=[
+                    ResponseInputTextParam(text=task, type="input_text"),
+                    ResponseInputImageParam(detail="high", image_url=f"data:image/jpeg;base64,{screenshot_base64}", type="input_image"),
+                ],
+                role="user",
+            ),
+            Message(content=[ResponseOutputText(annotations=[], text="Please confirm you want me to proceed?", type="output_text")], role="assistant"),
+            Message(
+                content=[
+                    ResponseInputTextParam(text="Yes", type="input_text"),
+                ],
+                role="user",
+            ),
+        ]
 
         while True:
             response = self.client.responses.create(
                 model="computer-use-preview",
-                tools=[{
-                    "type": "computer_use_preview",
-                    "display_width": 1024,
-                    "display_height": 768,
-                    "environment": "windows"
-                }],
+                tools=[{"type": "computer_use_preview", "display_width": 1024, "display_height": 768, "environment": "windows"}],
                 input=messages,
                 reasoning={
                     "generate_summary": "concise",
                 },
-                truncation="auto"
+                truncation="auto",
             )
 
             for item in response.output:
@@ -159,14 +142,8 @@ class Agent:
                     else:
                         tool_output = "requested tool unavailable"
 
-                    messages.append(
-                        {
-                            "type": "function_call_output",
-                            "call_id": item.call_id,
-                            "output": tool_output
-                        }
-                    )
-                    
+                    messages.append({"type": "function_call_output", "call_id": item.call_id, "output": tool_output})
+
             if isinstance(messages[-1], dict):
                 if messages[-1].get("role") == "assistant":
                     break
@@ -176,12 +153,13 @@ class Agent:
 
         return
 
+
 if __name__ == "__main__":
     env = ImageEnv("images/base.png")
     agent = Agent(environment=env)
-    
+
     engine = engine.set_agent(agent).set_context(env).finalize()
-    
+
     task = "click A, then B, then C, D, E, F"
 
     print("Running agent directly")

@@ -38,18 +38,26 @@ class Tool:
     def do_pre_check_capture(self, ctx: RuntimeContext, step: Step) -> Optional[Any]:
         args = self._resolve_args(ctx, step.args)
         kwargs = self._resolve_kwargs(ctx, step.kwargs)
-        return self.pre_check.capture(*args, **kwargs)
+        if self.pre_check is not None:
+            return self.pre_check.capture(*args, **kwargs)
+        return None
 
     def do_pre_check_compare(self, current, candidate) -> Optional[Any]:
-        return self.pre_check.compare(current, candidate)
+        if self.pre_check is not None:
+            return self.pre_check.compare(current, candidate)
+        return None
 
     def do_post_check_capture(self, ctx: RuntimeContext, step: Step) -> Optional[Any]:
         args = self._resolve_args(ctx, step.args)
         kwargs = self._resolve_kwargs(ctx, step.kwargs)
-        return self.post_check.capture(*args, **kwargs)
+        if self.post_check is not None:
+            return self.post_check.capture(*args, **kwargs)
+        return None
 
     def do_post_check_compare(self, current, candidate) -> Optional[Any]:
-        return self.post_check.compare(current, candidate)
+        if self.post_check is not None:
+            return self.post_check.compare(current, candidate)
+        return None
 
     def _resolve_args(self, ctx: RuntimeContext, args: List[Arg]) -> tuple:
         resolved = []
